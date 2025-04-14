@@ -10,7 +10,7 @@ torch_hub_models = json.load(open(model_file, "r"))
 available_models = sorted(torch_hub_models.keys())
 
 
-def get_model(args, model_name):
+def get_model(args, model_name, single_task=True):
     
     if model_name not in torch_hub_models:
         raise ValueError(f"Model '{model_name}' not found in available models.")
@@ -36,7 +36,7 @@ def get_model(args, model_name):
         raise ValueError(f"Invalid pretrained argument: {args.pretrained}")
     
     # set up multi-task heads
-    if args.num_tasks not in ["1", "tomato"]:
+    if not single_task:
         #TODO: implement multi-task modeling
         return -1
     
