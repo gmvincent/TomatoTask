@@ -1,0 +1,26 @@
+# general configs
+root: "/home/gmvincen"
+out_path: "outputs"
+random_seed: 42
+print_freq: 10
+gpu: 8
+dataparallel: False # multi-gpu training
+ddp: False
+
+cometml_project: "single_task"
+
+# data configs
+dataset_name: "plantvillage" # plantvillage, plantdoc, aichallenger
+
+# model configs
+model_name: "convnet" # pytorch models supported
+pretrained: False
+mode: "None"
+num_tasks: "1" # 1, 2, 3, tomato, 2_tomato
+
+# train configs
+lr: 0.0001
+weight_decay: 0.000075
+batch_size: 32
+epochs: 100
+optimizer_name: "Adam"
