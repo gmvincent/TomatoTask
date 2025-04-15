@@ -81,11 +81,10 @@ def main(args, experiment, dataloaders, rank):
     # load dataloaders
     train_dataloader, val_dataloader, test_dataloader = dataloaders
     
-    if rank == 0 and single_task:
-        #TODO: set up multi-task plotting of class distributions
-        plot_distribution(experiment, train_dataloader, args.classes, mode="train")
-        plot_distribution(experiment, val_dataloader, args.classes, mode="val")
-        plot_distribution(experiment, test_dataloader, args.classes, mode="test")
+    if rank == 0:
+        plot_distribution(args, experiment, train_dataloader, args.classes, mode="train")
+        plot_distribution(args, experiment, val_dataloader, args.classes, mode="val")
+        plot_distribution(args, experiment, test_dataloader, args.classes, mode="test")
     
     
     # get number of features

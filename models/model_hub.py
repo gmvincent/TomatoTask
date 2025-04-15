@@ -40,4 +40,29 @@ def get_model(args, model_name, single_task=True):
         #TODO: implement multi-task modeling
         return -1
     
+    get_target_layer(args, model_name, model)
+    
     return model
+
+def get_target_layer(args, model_name, model):
+    
+    if "fasterrcnn" in model_name:
+        args.target_layer = model.backbone
+    elif "resnet" in model_name:
+        args.target_layer = model.layer4[-1]
+    elif "vgg" in model_name:
+        args.target_layer = model.features[-1]
+    elif "dense" in model_name:
+        args.target_layer = model.features[-1]
+    elif "mobile" in model_name:
+        args.target_layer = model.features[-1]
+    elif "mnasnet" in model_name:
+        args.target_layer = model.layers[-1]
+    elif model_name.starts_with("vit"):
+        args.target_layer = model.blocks[-1].norm1
+    elif model_name.starts_with("swin"):
+        args.target_layer = model.layers[-1].blocks[-1].norm1
+    elif "efficient" in model_name:
+        args.target_layer = model.features[-1][0]
+    else:
+        raise ValueError(f"Model '{model_name}' does not have a predefined target_layer for GradCAM visualization.")
