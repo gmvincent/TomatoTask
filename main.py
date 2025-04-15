@@ -62,6 +62,7 @@ def main_worker(rank, args):
     train_dataloader, val_dataloader, test_dataloader, classes_dict  = create_data_loader(args) 
     if args.num_tasks in ["1", "tomato"]:
         args.classes = list(classes_dict.values())
+        args.num_classes = len(args.classes)
     else:
         args.classes = [[v for v in inner.values()] for inner in classes_dict.values()] # list of each task classes
     
@@ -81,14 +82,14 @@ def main(args, experiment, dataloaders, rank):
     # load dataloaders
     train_dataloader, val_dataloader, test_dataloader = dataloaders
     
-    if rank == 0:
-        plot_distribution(args, experiment, train_dataloader, args.classes, mode="train")
-        plot_distribution(args, experiment, val_dataloader, args.classes, mode="val")
-        plot_distribution(args, experiment, test_dataloader, args.classes, mode="test")
+    #if rank == 0:
+    #    plot_distribution(args, experiment, train_dataloader, args.classes, mode="train")
+    #    plot_distribution(args, experiment, val_dataloader, args.classes, mode="val")
+    #    plot_distribution(args, experiment, test_dataloader, args.classes, mode="test")
     
     
     # get number of features
-    images, _, _ = next(iter(train_dataloader)) 
+    images, _ = next(iter(train_dataloader)) 
     args.input_channels = images.shape[1]
     
     # get model by name
@@ -118,7 +119,7 @@ def main(args, experiment, dataloaders, rank):
         train_model, test_model = model_functions["multi"]
     
     # Initialize metrics
-    train_metrics, val_metrics, test_metrics = initialize_metrics(args, args.input_channels)
+    train_metrics, val_metrics, test_metrics = initialize_metrics(args)
     
     # Early Stopping
     early_stopping = EarlyStopping(patience=25, min_delta=1e-4)
@@ -152,7 +153,7 @@ def main(args, experiment, dataloaders, rank):
             val_metrics.reset()
             test_metrics.reset()
             
-            train_loss, train_r2, y_true_train, y_pred_train = train_model(
+            train_loss, train_acc, y_true_train, y_pred_train = train_model(
                 args,
                 model,
                 optimizer,
@@ -173,13 +174,13 @@ def main(args, experiment, dataloaders, rank):
                 
                 if (epoch >= args.epochs-1) or (epoch % args.print_freq == 0):
                     print(
-                        "\nEpoch: %d \t R-Squared: %.5f \tLoss: %.5f" % (epoch, train_r2, train_loss), flush=True
+                        "\nEpoch: %d \t Accuracy: %.5f \tLoss: %.5f" % (epoch, train_acc, train_loss), flush=True
                     )
             
                     #TODO: plot class activation maps
                     
                         
-            val_loss, val_r2, y_true, y_pred = test_model(
+            val_loss, val_acc, y_true, y_pred = test_model(
                 args,
                 model,
                 optimizer,
@@ -200,23 +201,23 @@ def main(args, experiment, dataloaders, rank):
                 
                 # Output intermediate statistics
                 if ((epoch >= args.epochs - 1) or (epoch % args.print_freq == 0)):
-                    print("\nVal R-Squared: %.5f \tVal Loss: %.5f" % (val_r2, val_loss), flush=True)
+                    print("\nVal Accuracy: %.5f \tVal Loss: %.5f" % (val_acc, val_loss), flush=True)
             
-                epoch_pbar.set_postfix({"Train Loss": train_loss, "Val Loss": val_loss, "Val R2": val_r2})
+                epoch_pbar.set_postfix({"Train Loss": train_loss, "Val Loss": val_loss, "Val acc": val_acc})
                 
                 # Check Early Stopping
                 if epoch > 1:
                     early_stopping(val_loss, model, epoch, experiment)
                     if early_stopping.early_stop:
                         print(
-                            "\nStopped at Epoch: %d \tVal R-Squared: %.5f \tVal Loss: %.5f" % (epoch, val_r2, val_loss)
+                            "\nStopped at Epoch: %d \tVal Accuracy: %.5f \tVal Loss: %.5f" % (epoch, val_acc, val_loss)
                         )
                         model.load_state_dict(early_stopping.best_weights)
                         args.epochs = epoch + 1
                         break
         
         # Test model
-        test_loss, test_r2, y_true, y_pred = test_model(
+        test_loss, test_acc, y_true, y_pred = test_model(
             args,
             model,
             optimizer,
@@ -232,7 +233,7 @@ def main(args, experiment, dataloaders, rank):
         if rank == 0 and experiment is not None:
             log_experiment(args, experiment, test_metrics, test_loss, epoch, y_true, y_pred, mode="test")
 
-            print("\nFinished Training: \tTest R-Squared: %.5f \tTest Loss: %.5f" % (test_r2, test_loss))
+            print("\nFinished Training: \tTest Accuracy: %.5f \tTest Loss: %.5f" % (test_acc, test_loss))
             
             log_model_weights(args, experiment, model)
         
@@ -242,9 +243,9 @@ def main(args, experiment, dataloaders, rank):
         val_metrics.reset()
         test_metrics.reset()
 
-        train_loss, train_r2, y_train, y_pred_train = train_model(args, model, train_dataloader, args.epochs - 1, train_metrics, return_preds=True)
-        val_loss, val_r2, y_val, y_pred_val = test_model(args, model, val_dataloader, args.epochs - 1, val_metrics, return_preds=True, task="val")
-        test_loss, test_r2, y_test, y_pred = test_model(args, model, test_dataloader, args.epochs - 1, test_metrics, return_preds=True, task="test")
+        train_loss, train_acc, y_train, y_pred_train = train_model(args, model, train_dataloader, args.epochs - 1, train_metrics, return_preds=True)
+        val_loss, val_acc, y_val, y_pred_val = test_model(args, model, val_dataloader, args.epochs - 1, val_metrics, return_preds=True, task="val")
+        test_loss, test_acc, y_test, y_pred = test_model(args, model, test_dataloader, args.epochs - 1, test_metrics, return_preds=True, task="test")
         
         # Log experiments
         log_experiment(args, experiment, train_metrics, train_loss, args.epochs - 1, y_train, y_pred_train, mode="train")
@@ -266,7 +267,7 @@ if __name__ == "__main__":
     random.seed(args.random_seed)
     torch.cuda.manual_seed_all(args.random_seed) 
     torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = True
+    torch.backends.cudnn.benchmark = False
     
     os.environ["CUDA_LAUNCH_BLOCKING"]="1"
     
@@ -276,6 +277,7 @@ if __name__ == "__main__":
         args.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print(f"Multi-GPU enabled. Using GPUs: {args.gpu}")
     else:
+        #os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu[0])
         args.device = torch.device(f"cuda:{args.gpu[0]}" if torch.cuda.is_available() and args.gpu else "cpu")
         print(f"Single-device mode. Using device: {args.device}")
     
@@ -284,7 +286,7 @@ if __name__ == "__main__":
         args.lr = args.lr * args.world_size
         args.batch_size = args.batch_size * args.world_size
         
-        mp.spawn(main_worker, args=((args,)), nprocs=args.world_size,)# join=True)
+        mp.spawn(main_worker, args=((args,)), nprocs=args.world_size,)
     else:
         # Single GPU or DataParallel logic
         main_worker(0, args)    
