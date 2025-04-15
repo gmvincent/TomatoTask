@@ -1,6 +1,7 @@
 import os 
 import time
 import torch
+import numpy as np
 
 def train_model(
     args,
@@ -23,9 +24,9 @@ def train_model(
         running_correct = 0
 
     for batch, data in enumerate(train_dataloader):
-        instances, labels, _ = data
+        instances, labels = data
         instances = instances.to(args.device).float()  
-        labels = labels.to(args.device).float()      
+        labels = labels.to(args.device).long()      
 
         optimizer.zero_grad()
 
@@ -33,12 +34,13 @@ def train_model(
         output = model(instances)
         end_time = time.time()
         
-        loss = criterion(output.squeeze(), labels)
+        loss = criterion(output, labels)
         
         loss.backward(retain_graph=True)
         optimizer.step()
 
-        predictions = output.squeeze()
+        predictions = output
+        
         running_loss += loss.item() * len(labels.cpu())
 
         # Update metrics
@@ -47,15 +49,14 @@ def train_model(
                 if name == "PredictionTime":
                     metric.update(start_time, end_time)
                 else:
-                    metric.update(predictions.cpu(), labels.cpu())
+                    metric.update(predictions, labels)
         else:
             running_correct += (predictions == labels).sum().item()
 
         # Store Predictions
         y_true.extend(labels.detach().cpu().numpy())
-        y_pred.extend(predictions.detach().cpu().numpy())
-        
-    
+        y_pred.extend(np.argmax(predictions.detach().cpu().numpy(), axis=1))
+
     # Train outputs
     epoch_loss = running_loss / len(train_dataloader.dataset)
 
@@ -97,17 +98,17 @@ def test_model(
 
     with torch.no_grad():
         for batch, data in enumerate(test_dataloader):
-            instances, labels, _ = data
+            instances, labels = data
             instances = instances.to(args.device).float()  
-            labels = labels.to(args.device).float()     
+            labels = labels.to(args.device).long()     
 
             start_time = time.time()
             output = model(instances)
             end_time = time.time()
             
-            loss = criterion(output.squeeze(), labels)
+            loss = criterion(output, labels)
 
-            predictions = output.squeeze()
+            predictions = output
             running_loss += loss.item() * len(labels.cpu())
 
             # Update metrics
@@ -116,13 +117,13 @@ def test_model(
                     if name == "PredictionTime":
                         metric.update(start_time, end_time)
                     else:
-                        metric.update(predictions.cpu(), labels.cpu())
+                        metric.update(predictions, labels)
             else:
                 running_correct += (predictions == labels).sum().item()
 
             # Store Predictions
             y_true.extend(labels.detach().cpu().numpy())
-            y_pred.extend(predictions.detach().cpu().numpy())
+            y_pred.extend(np.argmax(predictions.detach().cpu().numpy(), axis=1))
 
     # Test outputs
     epoch_loss = running_loss / len(test_dataloader.dataset)
