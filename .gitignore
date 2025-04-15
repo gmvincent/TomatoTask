@@ -1,0 +1,12 @@
+bash_scripts/
+images/
+notebooks/
+
+# ignore CometML csv files
+*.csv
+
+# ignore __pycache__ files
+*__pycache__*
+
+# ignore all weights and outputs
+outputs/
