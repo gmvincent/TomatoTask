@@ -74,8 +74,7 @@ def parse_args(config=None, desc="Multi-Task", **kwargs):
         args.gpu = list(filter(lambda x: x != ",", args.gpu))
         args.gpu = [int(gpu) for gpu in args.gpu]
     elif isinstance(args.gpu, int) or not args.dataparallel:  # If a single GPU ID is passed as an integer, convert it to a list
-        args.gpu = [int(args.gpu[0])]
-    
+        args.gpu = [int(args.gpu)]
     if not args.world_size:  # Infer world_size from number of GPUs
         args.world_size = len(args.gpu)
         
