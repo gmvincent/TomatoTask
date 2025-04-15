@@ -6,17 +6,17 @@ import torch
 import torchvision.transforms as transforms
 
 from data_utils.plantvillage import PlantVillage
-from data_utils.plantvillage import single_task_task as pv_single_class
+from data_utils.plantvillage import single_task as pv_single_class
 from data_utils.plantvillage import multi_task as pv_multi_class
 from data_utils.plantvillage import tomato_task as pv_tomato_class
 
 from data_utils.plantdoc import PlantDoc
-from data_utils.plantdoc import single_task_task as pd_single_class
+from data_utils.plantdoc import single_task as pd_single_class
 from data_utils.plantdoc import multi_task as pd_multi_class
 from data_utils.plantdoc import tomato_task as pd_tomato_class
 
 from data_utils.aichallenger import AIChallenger
-from data_utils.aichallenger import single_task_task as ac_single_class
+from data_utils.aichallenger import single_task as ac_single_class
 from data_utils.aichallenger import multi_task as ac_multi_class
 from data_utils.aichallenger import tomato_task as ac_tomato_class
 
@@ -92,21 +92,21 @@ def get_datasets(args, dataset_name, train_augs, val_augs):
         
         data_path = "PlantVillage_Dataset"
         train_ds = PlantVillage(
-                    root=data_path,
+                    root=os.path.join(args.root, data_path),
                     split="Train",
                     num_tasks=args.num_tasks,
                     transform=train_augs,
                 )
 
         val_ds = PlantVillage(
-                    root=data_path,
+                    root=os.path.join(args.root, data_path),
                     split="Val",
                     num_tasks=args.num_tasks,
                     transform=val_augs,
                 )
 
         test_ds = PlantVillage(
-                    root=data_path,
+                    root=os.path.join(args.root, data_path),
                     split="Test",
                     num_tasks=args.num_tasks,
                     transform=val_augs,
@@ -123,7 +123,7 @@ def get_datasets(args, dataset_name, train_augs, val_augs):
         
         data_path = "PlantDoc_Dataset"
         full_ds = PlantDoc(
-                    root=data_path,
+                    root=os.path.join(args.root, data_path),
                     split="train",
                     num_tasks=args.num_tasks,
                     transform=val_augs,
@@ -136,7 +136,7 @@ def get_datasets(args, dataset_name, train_augs, val_augs):
         
         train_ds = torch.utils.data.Subset(
             PlantDoc(
-                    root=data_path,
+                    root=os.path.join(args.root, data_path),
                     split="train",
                     num_tasks=args.num_tasks,
                     transform=train_augs,
@@ -146,7 +146,7 @@ def get_datasets(args, dataset_name, train_augs, val_augs):
         val_ds = torch.utils.data.Subset(full_ds, val_indices)
         
         test_ds = PlantDoc(
-                    root=data_path,
+                    root=os.path.join(args.root, data_path),
                     split="test",
                     num_tasks=args.num_tasks,
                     transform=val_augs,
@@ -163,7 +163,7 @@ def get_datasets(args, dataset_name, train_augs, val_augs):
         
         data_path = "aichallenger"
         full_ds = AIChallenger(
-                    root=data_path,
+                    root=os.path.join(args.root, data_path),
                     split="training_set",
                     num_tasks=args.num_tasks,
                     transform=val_augs,
@@ -176,7 +176,7 @@ def get_datasets(args, dataset_name, train_augs, val_augs):
         
         train_ds = torch.utils.data.Subset(
             AIChallenger(
-                    root=data_path,
+                    root=os.path.join(args.root, data_path),
                     split="training_set",
                     num_tasks=args.num_tasks,
                     transform=train_augs,
@@ -186,7 +186,7 @@ def get_datasets(args, dataset_name, train_augs, val_augs):
         val_ds = torch.utils.data.Subset(full_ds, val_indices)
         
         test_ds = AIChallenger(
-                    root=data_path,
+                    root=os.path.join(args.root, data_path),
                     split="testing_set",
                     num_tasks=args.num_tasks,
                     transform=val_augs,
