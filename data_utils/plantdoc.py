@@ -136,7 +136,7 @@ class PlantDoc(torch.utils.data.Dataset):
                 continue
             
             for img in os.listdir(os.path.join(dir, item)):
-                
-                data.extend([(os.path.join(dir, item, img), specie.lower().strip(), disease.lower().strip())])
+                if img.endswith((".png", ".jpg", ".JPG", ".PNG")):
+                    data.extend([(os.path.join(dir, item, img), specie.lower().strip(), disease.lower().strip())])
 
         return data

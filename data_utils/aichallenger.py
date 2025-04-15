@@ -192,13 +192,14 @@ class AIChallenger(torch.utils.data.Dataset):
         for img in img_files:
             if img not in img_to_class:
                 continue
-            
-            disease_class_id = img_to_class[img]
-            specie, disease, severity = single_task[disease_class_id].split("_", maxsplit=2)
-            
-            if self.num_tasks == "2_tomato" and specie != "tomato":
-                continue
-            
-            data.extend([(os.path.join(dir, "images", img), specie.lower().strip(), disease.lower().strip(), severity.lower().strip())])
+            if img.endswith((".png", ".jpg", ".JPG", ".PNG")):
+
+                disease_class_id = img_to_class[img]
+                specie, disease, severity = single_task[disease_class_id].split("_", maxsplit=2)
+                
+                if self.num_tasks == "2_tomato" and specie != "tomato":
+                    continue
+                
+                data.extend([(os.path.join(dir, "images", img), specie.lower().strip(), disease.lower().strip(), severity.lower().strip())])
 
         return data

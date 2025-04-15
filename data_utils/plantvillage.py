@@ -132,6 +132,10 @@ class PlantVillage(torch.utils.data.Dataset):
             
             for disease in os.listdir(dir):
                 
-                data.extend([(os.path.join(dir, disease, img), specie, disease) for img  in os.listdir(os.path.join(dir, disease))])
-
+                data.extend([
+                    (os.path.join(dir, disease, img), specie, disease)
+                    for img in os.listdir(os.path.join(dir, disease))
+                    if img.endswith((".png", ".jpg", ".JPG", ".PNG"))
+                ])
+                
         return data
