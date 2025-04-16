@@ -69,12 +69,12 @@ def parse_args(config=None, desc="Multi-Task", **kwargs):
     # Ensure output path exists
     if not os.path.exists(args.out_path):
         os.makedirs(args.out_path, exist_ok=True)
-        
+
     if isinstance(args.gpu, list) and len(args.gpu) > 1:  # If GPU is passed as a string (e.g., "4,5"), split and convert to a list of integers
         args.gpu = list(filter(lambda x: x != ",", args.gpu))
         args.gpu = [int(gpu) for gpu in args.gpu]
     elif isinstance(args.gpu, int) or not args.dataparallel:  # If a single GPU ID is passed as an integer, convert it to a list
-        args.gpu = [int(args.gpu)]
+        args.gpu = [int(args.gpu[0])]
     if not args.world_size:  # Infer world_size from number of GPUs
         args.world_size = len(args.gpu)
         
