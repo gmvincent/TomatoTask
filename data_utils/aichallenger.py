@@ -48,21 +48,23 @@ single_task = {
     41: "tomato_no disease_healthy",
     42: "tomato_powdery mildew_general",
     43: "tomato_powdery mildew_serious",
-    44: "tomato_early blight fungus_general",
-    45: "tomato_early blight fungus_serious",
-    46: "tomato_late blight water mold_general",
-    47: "tomato_late blight water mold_serious",
-    48: "tomato_leaf mold fungus_general",
-    49: "tomato_leaf mold fungus_serious",
-    50: "tomato_target spot bacteria_general",
-    51: "tomato_target spot bacteria_serious",
-    52: "tomato_septoria leaf spot fungus_general",
-    53: "tomato_septoria leaf spot fungus_serious",
-    54: "tomato_spider mite damage_general",
-    55: "tomato_spider mite damage_serious",
-    56: "tomato_ylcv virus_general",
-    57: "tomato_ylcv virus_serious",
-    58: "tomato_tomv_general"
+    44: "tomato_bacterial spot_general",
+    45: "tomato_bacterial spot_serious",
+    46: "tomato_early blight fungus_general",
+    47: "tomato_early blight fungus_serious",
+    48: "tomato_late blight water mold_general",
+    49: "tomato_late blight water mold_serious",
+    50: "tomato_leaf mold fungus_general",
+    51: "tomato_leaf mold fungus_serious",
+    52: "tomato_target spot bacteria_general",
+    53: "tomato_target spot bacteria_serious",
+    54: "tomato_septoria leaf spot fungus_general",
+    55: "tomato_septoria leaf spot fungus_serious",
+    56: "tomato_spider mite damage_general",
+    57: "tomato_spider mite damage_serious",
+    58: "tomato_ylcv virus_general",
+    59: "tomato_ylcv virus_serious",
+    60: "tomato_tomv_general"
 }
 
 multi_task = {
@@ -124,6 +126,7 @@ tomato_task = {
         8: "target spot bacteria",
         9: "tomv",
         10: "ylcv virus",
+        11: "bacterial spot"
     },
     "severity": {
         0: "healthy",

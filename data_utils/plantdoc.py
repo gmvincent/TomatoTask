@@ -4,7 +4,7 @@ from PIL import Image
 
 single_task = {
     0: "grape_leaf black rot",
-    1: "Strawberry leaf",
+    1: "strawberry_leaf",
     2: "corn_leaf blight",
     3: "tomato_leaf late blight",
     4: "tomato_leaf",
@@ -24,7 +24,7 @@ single_task = {
     18: "cherry_leaf",
     19: "potato_leaf early blight",
     20: "bell_pepper_leaf spot",
-    21: "apple_scab Leaf",
+    21: "apple_scab leaf",
     22: "corn_gray leaf spot",
     23: "tomato_septoria leaf spot",
     24: "raspberry_leaf",
@@ -60,7 +60,7 @@ multi_task = {
         8: "leaf bacterial spot",
         9: "leaf early blight",
         10: "leaf spot",
-        11: "scab Leaf",
+        11: "scab leaf",
         12: "gray leaf spot",
         13: "septoria leaf spot",
         14: "mold leaf",
@@ -103,8 +103,8 @@ class PlantDoc(torch.utils.data.Dataset):
         # get data
         img_file, species, disease_class = self.data[idx]
 
-        img = Image.open(img_file)
-        
+        img = Image.open(img_file).convert("RGB")  
+
         if self.transform is not None:
             img = self.transform(img)        
         
