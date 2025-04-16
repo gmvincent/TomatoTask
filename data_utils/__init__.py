@@ -57,9 +57,9 @@ def create_data_loader(args):
     train_loader = torch.utils.data.DataLoader(
         dataset=train_ds,
         batch_size=args.batch_size,
-        num_workers=0,
+        num_workers=4,
         drop_last=False,
-        persistent_workers=False,
+        persistent_workers=True,
         shuffle=True,
         pin_memory=True,
     )
@@ -67,19 +67,19 @@ def create_data_loader(args):
     val_loader = torch.utils.data.DataLoader(
         dataset=val_ds,
         batch_size=args.batch_size,
-        num_workers=0,
+        num_workers=4,
         drop_last=True,
-        persistent_workers=False,
+        persistent_workers=True,
         shuffle=False,
         pin_memory=True,
     )
     
     test_loader = torch.utils.data.DataLoader(
         dataset=test_ds,
-        num_workers=0,
+        num_workers=4,
         batch_size=args.batch_size,
         drop_last=True,
-        persistent_workers=False,
+        persistent_workers=True,
         shuffle=False,
         pin_memory=True,
     )
