@@ -32,7 +32,7 @@ def create_data_loader(args):
         [
             transforms.ToTensor(),
             transforms.Resize(
-                (64, 64), interpolation=transforms.InterpolationMode.NEAREST
+                (224, 224), interpolation=transforms.InterpolationMode.NEAREST
             ),
             transforms.RandomHorizontalFlip(),
             transforms.RandomRotation(degrees=15),
@@ -44,7 +44,7 @@ def create_data_loader(args):
         [
             transforms.ToTensor(),
             transforms.Resize(
-                (64, 64), interpolation=transforms.InterpolationMode.NEAREST
+                (224, 224), interpolation=transforms.InterpolationMode.NEAREST
             ),
             normal,
         ],
