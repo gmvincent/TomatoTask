@@ -26,13 +26,13 @@ class PredictionTime(torchmetrics.Metric):
 def initialize_metrics(args):
     def build_metrics(num_classes):
         metrics = {
-            "Accuracy": torchmetrics.Accuracy(num_classes=args.num_classes, task="multiclass"),
-            #"F1": torchmetrics.F1Score(average="none", num_classes=args.num_classes, task="multiclass"),
-            "Recall_macro": torchmetrics.Recall(average="macro", num_classes=args.num_classes, task="multiclass"), # also called Sensitivity
-            "Precision_macro": torchmetrics.Precision(average="macro", num_classes=args.num_classes, task="multiclass"),
-            "Specificity_macro": torchmetrics.Specificity(average="macro", num_classes=args.num_classes, task="multiclass"),
-            "F1_macro": torchmetrics.F1Score(average="macro", num_classes=args.num_classes, task="multiclass"),
-            "MCC": torchmetrics.MatthewsCorrCoef(num_classes=args.num_classes, task="multiclass"),
+            "Accuracy": torchmetrics.Accuracy(num_classes=num_classes, task="multiclass"),
+            #"F1": torchmetrics.F1Score(average="none", num_classes=num_classes, task="multiclass"),
+            "Recall_macro": torchmetrics.Recall(average="macro", num_classes=num_classes, task="multiclass"), # also called Sensitivity
+            "Precision_macro": torchmetrics.Precision(average="macro", num_classes=num_classes, task="multiclass"),
+            "Specificity_macro": torchmetrics.Specificity(average="macro", num_classes=num_classes, task="multiclass"),
+            "F1_macro": torchmetrics.F1Score(average="macro", num_classes=num_classes, task="multiclass"),
+            "MCC": torchmetrics.MatthewsCorrCoef(num_classes=num_classes, task="multiclass"),
             "PredictionTime": PredictionTime(),
         }
 
@@ -47,7 +47,7 @@ def initialize_metrics(args):
     else:
         # Multi-task setup
         train_metrics = []
-        for num_classes in args.classes:  # args.classes should be a list of class counts per task
+        for num_classes in args.num_classes:  # args.classes should be a list of class counts per task
             train_metrics.append(build_metrics(num_classes))
         val_metrics = [tm.clone() for tm in train_metrics]
         test_metrics = [tm.clone() for tm in train_metrics]

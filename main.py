@@ -20,7 +20,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import matplotlib
 
-from utils.cometml_logger import create_experiment, log_experiment, log_model_weights, plot_distribution
+from utils.cometml_logger import create_experiment, log_experiment, log_model_weights, plot_distribution, plot_cam, plot_attention_maps
 from utils import parse_args, setup_ddp, cleanup_ddp
 from utils.metrics import initialize_metrics, log_metrics
 from utils.early_stopping import EarlyStopping
@@ -65,7 +65,8 @@ def main_worker(rank, args):
         args.num_classes = len(args.classes)
     else:
         args.classes = [[v for v in inner.values()] for inner in classes_dict.values()] # list of each task classes
-    
+        args.num_classes = [len(class_lst) for class_lst in args.classes]
+        
     _, _, _ = main(args, experiment, [train_dataloader, val_dataloader, test_dataloader], rank)
     
     if args.ddp:
@@ -75,21 +76,26 @@ def main_worker(rank, args):
         experiment.end()
     
 def main(args, experiment, dataloaders, rank):
-    single_task = False
-    if args.num_tasks in ["1", "tomato"]:
-        single_task = True
         
     # load dataloaders
     train_dataloader, val_dataloader, test_dataloader = dataloaders
     
-    #if rank == 0:
-    #    plot_distribution(args, experiment, train_dataloader, args.classes, mode="train")
-    #    plot_distribution(args, experiment, val_dataloader, args.classes, mode="val")
-    #    plot_distribution(args, experiment, test_dataloader, args.classes, mode="test")
+    if rank == 0:
+        plot_distribution(args, experiment, train_dataloader, args.classes, mode="train")
+        plot_distribution(args, experiment, val_dataloader, args.classes, mode="val")
+        plot_distribution(args, experiment, test_dataloader, args.classes, mode="test")
     
+    single_task = False
+    if args.num_tasks in ["1", "tomato"]:
+        single_task = True
     
-    # get number of features
-    images, _ = next(iter(train_dataloader)) 
+        # get number of features
+        images, _ = next(iter(train_dataloader))  
+    elif args.num_tasks in ["2", "2_tomato"]:
+        images, _, _ = next(iter(train_dataloader))
+    else:
+        images, _, _, _ = next(iter(train_dataloader))  
+        
     args.input_channels = images.shape[1]
     
     # get model by name
@@ -122,7 +128,7 @@ def main(args, experiment, dataloaders, rank):
     train_metrics, val_metrics, test_metrics = initialize_metrics(args)
     
     # Early Stopping
-    early_stopping = EarlyStopping(patience=25, min_delta=1e-4)
+    early_stopping = EarlyStopping(patience=10, min_delta=1e-3)
     
     print("Begin Training", flush=True)
 
@@ -149,10 +155,15 @@ def main(args, experiment, dataloaders, rank):
                 val_dataloader.sampler.set_epoch(epoch)                 
             
             # reset metrics for this epoch
-            train_metrics.reset()
-            val_metrics.reset()
-            test_metrics.reset()
-            
+            if single_task:
+                train_metrics.reset()
+                val_metrics.reset()
+                test_metrics.reset()
+            else:
+                [tm.reset() for tm in train_metrics]
+                [vm.reset() for vm in val_metrics]
+                [tm.reset() for tm in test_metrics]
+                
             train_loss, train_acc, y_true_train, y_pred_train = train_model(
                 args,
                 model,
@@ -172,13 +183,11 @@ def main(args, experiment, dataloaders, rank):
                 current_lr = optimizer.param_groups[0]['lr']
                 experiment.log_metric(f"learning_rate", current_lr, step=epoch)
                 
-                if (epoch >= args.epochs-1) or (epoch % args.print_freq == 0):
-                    print(
-                        "\nEpoch: %d \t Accuracy: %.5f \tLoss: %.5f" % (epoch, train_acc, train_loss), flush=True
-                    )
-            
-                    #TODO: plot class activation maps
-                    
+                if (epoch >= args.epochs-1) or (epoch % args.print_freq == 0):                    
+                    if any(m in args.model_name.lower() for m in ["vit", "swin"]):
+                        plot_attention_maps(args, experiment, model, train_dataloader, epoch, mode="train")
+                    else:
+                        plot_cam(args, experiment, model, train_dataloader, epoch, mode="train")
                         
             val_loss, val_acc, y_true, y_pred = test_model(
                 args,
@@ -201,17 +210,26 @@ def main(args, experiment, dataloaders, rank):
                 
                 # Output intermediate statistics
                 if ((epoch >= args.epochs - 1) or (epoch % args.print_freq == 0)):
-                    print("\nVal Accuracy: %.5f \tVal Loss: %.5f" % (val_acc, val_loss), flush=True)
-            
+                    #print("\nVal Accuracy: %.5f \tVal Loss: %.5f" % (val_acc, val_loss), flush=True)
+                    if any(m in args.model_name.lower() for m in ["vit", "swin"]):
+                        plot_attention_maps(args, experiment, model, val_dataloader, epoch, mode="val")
+                    else:
+                        plot_cam(args, experiment, model, val_dataloader, epoch, mode="val")                        
+                        
                 epoch_pbar.set_postfix({"Train Loss": train_loss, "Val Loss": val_loss, "Val acc": val_acc})
                 
                 # Check Early Stopping
                 if epoch > 1:
                     early_stopping(val_loss, model, epoch, experiment)
                     if early_stopping.early_stop:
+                        if isinstance(val_acc, list):
+                            acc_str = ", ".join([f"{a:.3f}" for a in val_acc])
+                        else:
+                            acc_str = f"{val_acc:.5f}"
                         print(
-                            "\nStopped at Epoch: %d \tVal Accuracy: %.5f \tVal Loss: %.5f" % (epoch, val_acc, val_loss)
+                            f"\nStopped at Epoch: {epoch} \tVal Accuracy: {acc_str} \tVal Loss: {val_loss:.5f}"
                         )
+                        
                         model.load_state_dict(early_stopping.best_weights)
                         args.epochs = epoch + 1
                         break
@@ -232,8 +250,16 @@ def main(args, experiment, dataloaders, rank):
                
         if rank == 0 and experiment is not None:
             log_experiment(args, experiment, test_metrics, test_loss, epoch, y_true, y_pred, mode="test")
-
-            print("\nFinished Training: \tTest Accuracy: %.5f \tTest Loss: %.5f" % (test_acc, test_loss))
+            if any(m in args.model_name.lower() for m in ["vit", "swin"]):
+                plot_attention_maps(args, experiment, model, test_dataloader, epoch, mode="test")
+            else:
+                plot_cam(args, experiment, model, test_dataloader, epoch,mode="test")
+                
+            if isinstance(test_acc, list):
+                acc_str = ", ".join([f"{a:.3f}" for a in test_acc])
+            else:
+                acc_str = f"{test_acc:.5f}"
+            print(f"\nFinished Training: \tTest Accuracy: {acc_str} \tTest Loss: {test_loss:.5f}")
             
             log_model_weights(args, experiment, model)
         
@@ -277,9 +303,10 @@ if __name__ == "__main__":
         args.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print(f"Multi-GPU enabled. Using GPUs: {args.gpu}")
     else:
-        #os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu[0])
+        os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu[0])
         args.device = torch.device(f"cuda:{args.gpu[0]}" if torch.cuda.is_available() and args.gpu else "cpu")
         print(f"Single-device mode. Using device: {args.device}")
+        args.device = torch.device(f"cuda" if torch.cuda.is_available() else "cpu")
     
     if args.ddp:
         args.world_size = len(args.gpu)

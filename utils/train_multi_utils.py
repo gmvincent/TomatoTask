@@ -44,7 +44,7 @@ def train_model(
             labels = labels.to(args.device).long()      
 
             start_time = time.time()
-            output = model(input, task_id=idx)
+            output = model(input, task_idx=idx)
             end_time = time.time()
             
             task_loss = criterion(output, labels)
@@ -53,7 +53,7 @@ def train_model(
             
             predictions[idx] = output
             y_true[idx].extend(labels.detach().cpu().numpy())
-            y_pred[idx].extend(torch.argmax(predictions, axis=1).detach().cpu().numpy())
+            y_pred[idx].extend(torch.argmax(output, axis=1).detach().cpu().numpy())
             
             # Update metrics
             if train_metrics is not None:
@@ -61,7 +61,7 @@ def train_model(
                     if name == "PredictionTime":
                         metric.update(start_time, end_time)
                     else:
-                        metric.update(predictions[idx].cpu(), labels.cpu())
+                        metric.update(predictions[idx], labels)
             else:
                 running_correct[idx] += (y_pred[idx] == labels.cpu()).sum().item()
                         
@@ -131,7 +131,7 @@ def test_model(
                 labels = labels.to(args.device).long()      
 
                 start_time = time.time()
-                output = model(input, task_id=idx)
+                output = model(input, task_idx=idx)
                 end_time = time.time()
 
                 task_loss = criterion(output, labels)
@@ -139,7 +139,7 @@ def test_model(
                 
                 predictions[idx] = output
                 y_true[idx].extend(labels.detach().cpu().numpy())
-                y_pred[idx].extend(torch.argmax(predictions, axis=1).detach().cpu().numpy())
+                y_pred[idx].extend(torch.argmax(output, axis=1).detach().cpu().numpy())
                 
                 # Update metrics
                 if test_metrics is not None:
@@ -147,7 +147,7 @@ def test_model(
                         if name == "PredictionTime":
                             metric.update(start_time, end_time)
                         else:
-                            metric.update(predictions[idx].cpu(), labels.cpu())
+                            metric.update(predictions[idx], labels)
                 else:
                     running_correct[idx] += (y_pred[idx] == labels.cpu()).sum().item()
                     
