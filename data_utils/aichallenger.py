@@ -7,7 +7,7 @@ single_task = {
     0: "apple_no disease_healthy",
     1: "apple_scab_general",
     2: "apple_scab_serious",
-    3: "apple_frogeye_spot",
+    3: "apple_frogeye spot_general",
     4: "apple_cedar apple rust_general",
     5: "apple_cedar apple rust_serious",
     6: "cherry_no disease_healthy",
@@ -89,7 +89,7 @@ multi_task = {
         5: "cercospora zeae maydis tehon and daniels", 
         6: "curvularia leaf spot fungus",
         7: "early blight fungus", 
-        8: "frogeye",
+        8: "frogeye spot",
         9: "greening june", 
         10: "late blight fungus", 
         11: "late blight water mold",
@@ -119,14 +119,13 @@ tomato_task = {
         1: "early blight fungus",
         2: "late blight water mold",
         3: "leaf mold fungus",
-        4: "no disease",
-        5: "powdery mildew",
-        6: "septoria leaf spot fungus",
-        7: "spider mite damage",
-        8: "target spot bacteria",
-        9: "tomv",
-        10: "ylcv virus",
-        11: "bacterial spot"
+        4: "powdery mildew",
+        5: "septoria leaf spot fungus",
+        6: "spider mite damage",
+        7: "target spot bacteria",
+        8: "tomv",
+        9: "ylcv virus",
+        10: "bacterial spot"
     },
     "severity": {
         0: "healthy",
@@ -176,9 +175,10 @@ class AIChallenger(torch.utils.data.Dataset):
             return img, first_label, second_label, third_label
         
         elif self.num_tasks == "2_tomato":
-            label = {v: k for k, v in tomato_task.items()}[f"{disease_class}"]
+            first_label = {v: k for k, v in tomato_task["disease"].items()}[f"{disease_class}"]
+            second_label = {v: k for k, v in tomato_task["severity"].items()}[f"{severity}"]
             
-            return img, label
+            return img, first_label, second_label
     
     
     def __load_files(self):
