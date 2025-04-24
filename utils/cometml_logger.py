@@ -301,7 +301,6 @@ def get_attention_map(model, img, single_task=True):
             attn_weights = output[1]
         else:
             attn_weights = output
-
         if attn_weights is not None:
             attention_maps.append(attn_weights.detach().cpu())
 
@@ -362,7 +361,7 @@ def get_attention_map(model, img, single_task=True):
         
         sa_module.forward = forward_with_weights
         hook_handle = sa_module.register_forward_hook(hook_fn)
-
+    
     # Torchvision Swin
     elif hasattr(model_to_check, "features"):
         last_block = model_to_check.features[-1][1]
@@ -405,7 +404,10 @@ def get_attention_map(model, img, single_task=True):
             mask = attn.numpy()
     else:    
         attn = attention_maps[-1]  # [B, num_heads, num_tokens, num_tokens]
+        if attn.dim() == 4:
+            attn = attn.mean(dim=1)[0] # Average over heads, get first item in batch
 
+        # Propagate CLS attention
         identity = torch.eye(attn.size(-1))
         a = (attn + identity) / 2
         a = a / a.sum(dim=-1, keepdim=True)
