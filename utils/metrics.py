@@ -72,29 +72,9 @@ def log_metrics(experiment, metrics, loss, step, mode="train"):
 
     # Log loss (shared across tasks or single)
     experiment.log_metric(f"{mode}/loss", loss if loss is not None else 0, step=step)
-
-
-def reduce_tensor(tensor, world_size):
-    """
-    Averages a tensor across all processes in DDP.
-    """
-    if world_size > 1:
-        rt = tensor.clone()
-        dist.all_reduce(rt, op=dist.ReduceOp.SUM)
-        rt /= world_size
-    return tensor
-
-def log_metrics_ddp(args, experiment, metrics, loss, step, mode="train"):       
-    # Reduce metrics across processes
-    world_size = dist.get_world_size() if args.ddp else 1
-
-    loss_tensor = torch.tensor(loss, device=args.device)
-    loss_reduced = reduce_tensor(loss_tensor, world_size).item()
     
-    if args.ddp and metrics is not None:
-        metrics.sync()
-
-    dist.barrier() 
-    
-    log_metrics(experiment, metrics, loss_reduced, step, mode)
-    
+def gather_tensor(args, tensor):   
+    # Non-scalar: gather all tensors
+    tensors_gather = [torch.zeros_like(tensor) for _ in range(args.world_size)]
+    dist.all_gather(tensors_gather, tensor)
+    return torch.cat(tensors_gather, dim=0).detach()
