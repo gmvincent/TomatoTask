@@ -1,6 +1,6 @@
 import argparse
 import os
-import random
+import signal
 import numpy as np
 import torch
 from warnings import warn
@@ -127,5 +127,13 @@ def cleanup_ddp():
     """
     Cleans up the process group for Distributed Data Parallel (DDP).
     """
-    dist.barrier()
-    dist.destroy_process_group()
+    if dist.is_initialized():
+        dist.barrier()
+        dist.destroy_process_group()
+        
+def handle_sigterm(signum, frame):
+    print("Caught SIGTERM, cleaning up...")
+    if dist.is_initialized():
+        dist.destroy_process_group()
+    torch.cuda.empty_cache()
+    exit(0)
