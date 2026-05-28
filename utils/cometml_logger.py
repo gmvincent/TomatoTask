@@ -25,7 +25,7 @@ from sklearn.metrics import confusion_matrix
 
 from thop import profile, clever_format
 
-from utils.metrics import initialize_metrics, log_metrics, log_metrics_ddp
+from utils.metrics import initialize_metrics, log_metrics
 
 import warnings
 warnings.filterwarnings("ignore", category=FutureWarning, module="sklearn.manifold")
@@ -35,7 +35,7 @@ def create_experiment(args):
     now = datetime.datetime.now()
     
     experiment_name = f"{args.model_name}_{args.num_tasks}task_{args.dataset_name}_{now.strftime('%y%m%d%H%M')}"
-
+    experiment = None
     experiment = Experiment(
         api_key="6XqmAhuJUkx6wPhz0sdCRXwRz",
         project_name=args.cometml_project, 
@@ -58,9 +58,6 @@ def log_experiment(
     
     # log plots
     if (epoch >= args.epochs - 1) or (epoch % args.print_freq == 0):
-        #y_true = torch.as_tensor(y_true).cpu().detach().numpy()
-        #y_pred = torch.as_tensor(y_pred).cpu().detach().numpy()
-
         plot_confusion_matrix(args, experiment, y_true, y_pred, epoch, mode)
         
     if (epoch >= args.epochs - 1) and (mode == "test"):
