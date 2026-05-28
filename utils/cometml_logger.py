@@ -35,7 +35,7 @@ def create_experiment(args):
     now = datetime.datetime.now()
     
     experiment_name = f"{args.model_name}_{args.num_tasks}task_{args.dataset_name}_{now.strftime('%y%m%d%H%M')}"
-    experiment = None
+    
     experiment = Experiment(
         api_key="6XqmAhuJUkx6wPhz0sdCRXwRz",
         project_name=args.cometml_project, 
