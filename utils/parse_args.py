@@ -1,10 +1,6 @@
 import argparse
 import os
-import signal
-import numpy as np
 import torch
-from warnings import warn
-
 import torch
 import torch.distributed as dist
 
@@ -100,9 +96,9 @@ def find_free_port():
     # taken from https://github.com/ShigekiKarita/pytorch-distributed-slurm-example/blob/master/main_distributed.py
     import socket
 
-    s = socket.socket()
-    s.bind(("", 0))  # Bind to a free port provided by the host.
-    return s.getsockname()[1]  # Return the port number assigned.
+    with socket.socket() as s:
+        s.bind(("", 0))  # Bind to a free port provided by the host.
+        return s.getsockname()[1]  # Return the port number assigned.
 
 def setup_ddp(args, rank):
     """
@@ -112,16 +108,17 @@ def setup_ddp(args, rank):
     os.environ["MASTER_ADDR"] = args.master_addr
     os.environ["MASTER_PORT"] = str(args.master_port)
 
+    # Set the GPU device for this process
+    torch.cuda.set_device(args.gpu[rank])
+    
     # Initialize the process group
     dist.init_process_group(
             backend="nccl",  # Use NCCL for GPUs; use "gloo" for CPU
             init_method="env://",  # Initialize via environment variables
             world_size=args.world_size,
             rank=rank,
+            device_id=torch.device(f"cuda:{args.gpu[rank]}")
         )
-
-    # Set the GPU device for this process
-    torch.device(f"cuda:{args.gpu[rank]}")
     
 def cleanup_ddp():
     """
