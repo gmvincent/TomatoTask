@@ -8,20 +8,21 @@ import numpy as np
 class PredictionTime(torchmetrics.Metric):
     def __init__(self):
         super().__init__()
-        self.add_state("total_time", default=torch.tensor(0.0), dist_reduce_fx="sum")
-        self.add_state("count", default=torch.tensor(0), dist_reduce_fx="sum")
+        self.add_state("total_time", default=torch.tensor(0.0, dtype=torch.float32), dist_reduce_fx="sum")
+        self.add_state("count", default=torch.tensor(0, dtype=torch.int64), dist_reduce_fx="sum")
 
-    def update(self, start_time, end_time):
-        self.total_time += torch.tensor(end_time - start_time)
-        self.count += 1
+    def update(self, start_time, end_time, batch_size: int):
+        duration = torch.tensor(end_time - start_time, dtype=torch.float32, device=self.device)
+        self.total_time += duration
+        self.count += batch_size
 
     def compute(self):
+        if self.count == 0:
+            return torch.tensor(0.0, device=self.device)
         return self.total_time / self.count
 
     def reset(self):
-        self.total_time = torch.tensor(0.0)
-        self.count = torch.tensor(0)
-
+        super().reset()
 
 def initialize_metrics(args):
     def build_metrics(num_classes):
