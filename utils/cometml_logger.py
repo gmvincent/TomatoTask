@@ -209,6 +209,7 @@ def plot_cam(args, experiment, model, dataloader, step, mode, num_images=6):
 
         for i in range(num_images):
             rgb_img = inputs[i].cpu().permute(1, 2, 0).numpy()
+            if args.input_channels > 3: rgb_img = rgb_img[:,:,:3]
             rgb_img = (rgb_img - rgb_img.min()) / (rgb_img.max() - rgb_img.min() + 1e-8)  # normalize
             visualization = show_cam_on_image(rgb_img, grayscale_cam[i], use_rgb=True)
 
@@ -261,6 +262,7 @@ def plot_cam(args, experiment, model, dataloader, step, mode, num_images=6):
 
             for i in range(num_images):
                 rgb_img = inputs[i].cpu().permute(1, 2, 0).numpy()
+                if args.input_channels > 3: rgb_img = rgb_img[:,:,:3]
                 rgb_img = (rgb_img - rgb_img.min()) / (rgb_img.max() - rgb_img.min() + 1e-8)  # normalize
                 visualization = show_cam_on_image(rgb_img, grayscale_cam[i], use_rgb=True)
 
@@ -433,8 +435,9 @@ def plot_attention_maps(args, experiment, model, dataloader, step, mode, num_ima
         
         for i in range(num_images):
             rgb_img = inputs[i].detach().cpu().permute(1, 2, 0).numpy()
-            img_np = (rgb_img - rgb_img.min()) / (rgb_img.max() - rgb_img.min())
-            rgb_img = Image.fromarray((img_np * 255).astype(np.uint8))
+            if args.input_channels > 3: rgb_img = rgb_img[:,:,:3]
+            rgb_img = (rgb_img - rgb_img.min()) / (rgb_img.max() - rgb_img.min())
+            rgb_img = Image.fromarray((rgb_img * 255).astype(np.uint8))
             
             input_img = inputs[i].unsqueeze(0).to(args.device)
             mask = get_attention_map(model, input_img)
@@ -484,8 +487,9 @@ def plot_attention_maps(args, experiment, model, dataloader, step, mode, num_ima
             
             for i in range(num_images):
                 rgb_img = inputs[i].detach().cpu().permute(1, 2, 0).numpy()
-                img_np = (rgb_img - rgb_img.min()) / (rgb_img.max() - rgb_img.min())
-                rgb_img = Image.fromarray((img_np * 255).astype(np.uint8))
+                if args.input_channels > 3: rgb_img = rgb_img[:,:,:3]
+                rgb_img = (rgb_img - rgb_img.min()) / (rgb_img.max() - rgb_img.min())
+                rgb_img = Image.fromarray((rgb_img * 255).astype(np.uint8))
                 
                 input_img = inputs[i].unsqueeze(0).to(args.device)
                 mask = get_attention_map(wrapped_model, input_img, single_task=False)
