@@ -2,8 +2,6 @@ import comet_ml
 from comet_ml import Experiment
 from comet_ml.integration.pytorch import log_model
 
-import os
-import cv2
 import torch
 import torch.distributed as dist
 import numpy as np
@@ -58,7 +56,7 @@ def log_experiment(
     
     # log plots
     if (epoch >= args.epochs - 1) or (epoch % args.print_freq == 0):
-        plot_confusion_matrix(args, experiment, y_true, y_pred, epoch, mode)
+        plot_confusion_matrix(args, experiment, y_true.cpu(), y_pred.cpu(), epoch, mode)
         
     if (epoch >= args.epochs - 1) and (mode == "test"):
         # Log Experiment Specific Args
