@@ -1,13 +1,10 @@
-import os 
 import time
 import torch
-import numpy as np
 
 def train_model(
     args,
     model,
     optimizer,
-    scheduler,
     criterion,
     train_dataloader,
     epoch,
@@ -16,10 +13,8 @@ def train_model(
 ):
     model.train()
 
-    y_pred = []
-    y_true = []
-    
-    running_loss = 0
+    y_pred, y_true  = [], []
+    running_loss, running_samples = 0, 0
     if train_metrics is None:
         running_correct = 0
 
@@ -28,6 +23,8 @@ def train_model(
         instances = instances.to(args.device).float()  
         labels = labels.to(args.device).long()      
 
+        batch_size = instances.size(0)
+        
         optimizer.zero_grad()
 
         start_time = time.time()
@@ -36,38 +33,39 @@ def train_model(
         
         loss = criterion(output, labels)
         
-        loss.backward(retain_graph=True)
+        loss.backward()
         optimizer.step()
-
-        predictions = output
         
-        running_loss += loss.item() * len(labels.cpu())
+        preds = output.argmax(dim=1)
+        running_loss += loss.item() * batch_size
+        running_samples += batch_size
 
         # Update metrics
         if train_metrics is not None:
             for name, metric in train_metrics.items():
                 if name == "PredictionTime":
-                    metric.update(start_time, end_time)
+                    metric.update(start_time, end_time, batch_size=batch_size)
                 else:
-                    metric.update(predictions, labels)
+                    metric.update(output, labels)
         else:
-            running_correct += (predictions == labels).sum().item()
+            running_correct += (preds == labels).sum().item()
 
         # Store Predictions
-        y_true.extend(labels.detach().cpu().numpy())
-        y_pred.extend(np.argmax(predictions.detach().cpu().numpy(), axis=1))
+        y_true.append(labels)
+        y_pred.append(preds)
+    
+    y_true = torch.cat(y_true)
+    y_pred = torch.cat(y_pred).detach()
 
     # Train outputs
-    epoch_loss = running_loss / len(train_dataloader.dataset)
+    epoch_loss = (running_loss / running_samples)
 
     # compute metrics at the end of this epoch
     if train_metrics is not None:
         metrics_dict = train_metrics.compute()
-        if args.ddp:
-            torch.distributed.all_reduce(metrics_dict)
         epoch_acc = metrics_dict["Accuracy"].item()
     else:
-        epoch_acc = running_correct / len(train_dataloader.dataset)
+        epoch_acc = (running_correct / running_samples)
 
     if return_preds:
         return epoch_loss, epoch_acc, y_true, y_pred
@@ -78,7 +76,6 @@ def test_model(
     args,
     model,
     optimizer,
-    scheduler,
     criterion,
     test_dataloader,
     epoch,
@@ -89,10 +86,8 @@ def test_model(
 
     model.eval()
 
-    y_pred = []
-    y_true = []
-
-    running_loss = 0
+    y_pred, y_true  = [], []
+    running_loss, running_samples = 0, 0
     if test_metrics is None:
         running_correct = 0
 
@@ -100,7 +95,9 @@ def test_model(
         for batch, data in enumerate(test_dataloader):
             instances, labels = data
             instances = instances.to(args.device).float()  
-            labels = labels.to(args.device).long()     
+            labels = labels.to(args.device).long()
+            
+            batch_size = instances.size(0)     
 
             start_time = time.time()
             output = model(instances)
@@ -108,34 +105,36 @@ def test_model(
             
             loss = criterion(output, labels)
 
-            predictions = output
-            running_loss += loss.item() * len(labels.cpu())
+            preds = output.argmax(dim=1)
+            running_loss += loss.item() * batch_size
+            running_samples += batch_size
 
             # Update metrics
             if test_metrics is not None:
                 for name, metric in test_metrics.items():
                     if name == "PredictionTime":
-                        metric.update(start_time, end_time)
+                        metric.update(start_time, end_time, batch_size=batch_size)
                     else:
-                        metric.update(predictions, labels)
+                        metric.update(output, labels)
             else:
-                running_correct += (predictions == labels).sum().item()
+                running_correct += (preds == labels).sum().item()
 
             # Store Predictions
-            y_true.extend(labels.detach().cpu().numpy())
-            y_pred.extend(np.argmax(predictions.detach().cpu().numpy(), axis=1))
+            y_true.append(labels)
+            y_pred.append(preds)
 
+    y_true = torch.cat(y_true)
+    y_pred = torch.cat(y_pred).detach()
+    
     # Test outputs
-    epoch_loss = running_loss / len(test_dataloader.dataset)
+    epoch_loss = (running_loss / running_samples)
 
     # compute metrics at the end of this epoch
     if test_metrics is not None:
         metrics_dict = test_metrics.compute()
-        if args.ddp:
-            torch.distributed.all_reduce(metrics_dict)
         epoch_acc = metrics_dict["Accuracy"].item()
     else:
-        epoch_acc = running_correct / len(test_dataloader.dataset)
+        epoch_acc = (running_correct / running_samples)
 
     if return_preds:
         return epoch_loss, epoch_acc, y_true, y_pred
