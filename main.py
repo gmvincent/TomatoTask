@@ -1,28 +1,25 @@
+import warnings
+import os
+
+warnings.filterwarnings("ignore", message=".*pkg_resources is deprecated as an API.*")
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="pkg_resources")
+os.environ["PYTHONWARNINGS"] = "ignore::UserWarning:comet_ml"
+
 import comet_ml
-from comet_ml.integration.pytorch import log_model
-
-import optuna
-
-import cProfile
-import pstats
+#from comet_ml.integration.pytorch import log_model
 
 import os
-import time
 import torch
-import random
+import signal
 import numpy as np
 from tqdm import tqdm
 
 import torch.multiprocessing as mp
 import torch.distributed as dist
 
-import seaborn as sns
-import matplotlib.pyplot as plt
-import matplotlib
-
 from utils.cometml_logger import create_experiment, log_experiment, log_model_weights, plot_distribution, plot_cam, plot_attention_maps
-from utils import parse_args, setup_ddp, cleanup_ddp
-from utils.metrics import initialize_metrics, log_metrics
+from utils import parse_args, setup_ddp, cleanup_ddp, set_seed, handle_sigterm
+from utils.metrics import initialize_metrics, log_metrics, gather_tensor
 from utils.early_stopping import EarlyStopping
 
 from models.model_hub import get_model
@@ -42,48 +39,75 @@ model_functions = {
 }
 
 def main_worker(rank, args):
-    args.rank = rank
-    
-    if args.ddp:
-        setup_ddp(args, rank)
-        # Ensure each process only uses the assigned GPU
-        torch.cuda.set_device(rank)
-        args.device = torch.device(f'cuda:{rank}')
-                
-        dist.barrier()
-    
-    if rank == 0:
-        print(f"Created Exp: {rank}")
-        experiment = create_experiment(args)
-    else:
-        experiment = None
-    
-    # create dataloaders
-    train_dataloader, val_dataloader, test_dataloader, classes_dict  = create_data_loader(args) 
-    if args.num_tasks in ["1", "tomato"]:
-        args.classes = list(classes_dict.values())
-        args.num_classes = len(args.classes)
-    else:
-        args.classes = [[v for v in inner.values()] for inner in classes_dict.values()] # list of each task classes
-        args.num_classes = [len(class_lst) for class_lst in args.classes]
+    try:
+        # set random seeds
+        set_seed(args.random_seed, rank, True)
         
-    _, _, _ = main(args, experiment, [train_dataloader, val_dataloader, test_dataloader], rank)
+        if args.ddp:
+            setup_ddp(args, rank)
+        if torch.cuda.is_available():
+            args.device = torch.device(f"cuda:{args.gpu[rank]}")
+        
+        if rank == 0:
+            print(f"Created Exp: {rank}")
+            experiment = create_experiment(args)
+        else:
+            experiment = None
+        
+        # create dataloaders
+        if rank==0: print("Creating Dataloaders", flush=True)
+        train_dataloader, val_dataloader, test_dataloader, classes_dict  = create_data_loader(args, rank) 
+        
+        if args.num_tasks in ["1", "tomato"]:
+            args.classes = list(classes_dict.values())
+            args.num_classes = len(args.classes)
+        else:
+            args.classes = [[v for v in inner.values()] for inner in classes_dict.values()] # list of each task classes
+            args.num_classes = [len(class_lst) for class_lst in args.classes]
+            
+        if args.num_tasks == "1v2":    
+            for i in args.num_classes:
+                _, _, _ = main(args, experiment, [train_dataloader, val_dataloader, test_dataloader], rank)
+        else:
+            _, _, _ = main(args, experiment, [train_dataloader, val_dataloader, test_dataloader], rank)
+        
+    except Exception as e:
+        print(f"Rank {rank} failed: {e}")
+        raise
     
-    if args.ddp:
-        cleanup_ddp()
-    
-    if rank == 0 and experiment is not None:
-        experiment.end()
+    finally:  
+        if args.ddp:
+            cleanup_ddp()
+        
+        if rank == 0 and experiment is not None:
+            experiment.end()
     
 def main(args, experiment, dataloaders, rank):
-        
+    
     # load dataloaders
     train_dataloader, val_dataloader, test_dataloader = dataloaders
     
-    if rank == 0:
-        plot_distribution(args, experiment, train_dataloader, args.classes, mode="train")
-        plot_distribution(args, experiment, val_dataloader, args.classes, mode="val")
-        plot_distribution(args, experiment, test_dataloader, args.classes, mode="test")
+    if rank == 0 and args.dataset_name not in ["spirals", "graph_meshes"]:
+        if args.ddp:
+            plot_train_loader = torch.utils.data.DataLoader(
+                train_dataloader.dataset, batch_size=args.batch_size, shuffle=False, num_workers=0
+            )
+            plot_val_loader = torch.utils.data.DataLoader(
+                val_dataloader.dataset, batch_size=args.batch_size, shuffle=False, num_workers=0
+            )
+            plot_test_loader = torch.utils.data.DataLoader(
+                test_dataloader.dataset, batch_size=args.batch_size, shuffle=False, num_workers=0
+            )
+        else:
+            plot_train_loader = train_dataloader
+            plot_val_loader = val_dataloader
+            plot_test_loader = test_dataloader
+
+        plot_distribution(args, experiment, plot_train_loader, args.classes, mode="train")
+        plot_distribution(args, experiment, plot_val_loader, args.classes, mode="val")
+        plot_distribution(args, experiment, plot_test_loader, args.classes, mode="test")
+    
+    if args.ddp: dist.barrier(device_ids=[args.gpu[rank]])
     
     single_task = False
     if args.num_tasks in ["1", "tomato"]:
@@ -91,7 +115,7 @@ def main(args, experiment, dataloaders, rank):
     
         # get number of features
         images, _ = next(iter(train_dataloader))  
-    elif args.num_tasks in ["2", "2_tomato"]:
+    elif args.num_tasks in ["2", "2_tomato", "1v2"]:
         images, _, _ = next(iter(train_dataloader))
     else:
         images, _, _, _ = next(iter(train_dataloader))  
@@ -105,14 +129,12 @@ def main(args, experiment, dataloaders, rank):
     if args.dataparallel:
         model = torch.nn.DataParallel(model)
     elif args.ddp:
-        torch.cuda.set_device(rank)
-        model.to(torch.device(f"cuda:{rank}"))
-
-        model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
+        model.to(args.device)
+        #model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
         model = torch.nn.parallel.DistributedDataParallel(
             model,
-            device_ids=[rank],
-            output_device=rank,
+            device_ids=[args.gpu[rank]],
+            output_device=args.gpu[rank],
         )
     else:
         model.to(args.device)
@@ -128,16 +150,16 @@ def main(args, experiment, dataloaders, rank):
     train_metrics, val_metrics, test_metrics = initialize_metrics(args)
     
     # Early Stopping
-    early_stopping = EarlyStopping(patience=10, min_delta=1e-3)
+    early_stopping = EarlyStopping(patience=10, min_delta=1e-4)
     
-    print("Begin Training", flush=True)
+    if rank==0: print("Begin Training", flush=True)
 
     # Train/Fit the Models
     if args.model_name not in ["svm", "rf"]:
         criterion = torch.nn.CrossEntropyLoss()
         
         if args.optimizer_name == 'Adam':
-            optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+            optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
         elif args.optimizer_name == 'SGD':
             optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=args.weight_decay)
         
@@ -145,10 +167,12 @@ def main(args, experiment, dataloaders, rank):
         
         model = model.to(args.device)        
         
-        if args.ddp:
-            dist.barrier() # synchronize before starting training
+        if args.ddp: dist.barrier(device_ids=[args.gpu[rank]]) # synchronize before starting training
         
-        epoch_pbar = tqdm(range(args.epochs), total=args.epochs, desc=f"Training Model (rank {args.rank})", unit="epoch") 
+        if rank == 0:
+            epoch_pbar = tqdm(range(args.epochs), total=args.epochs, desc=f"Training Model (rank {rank})", unit="epoch") 
+        else:
+            epoch_pbar = range(args.epochs)
         for epoch in epoch_pbar:  
             if args.ddp:
                 train_dataloader.sampler.set_epoch(epoch)  
@@ -168,59 +192,63 @@ def main(args, experiment, dataloaders, rank):
                 args,
                 model,
                 optimizer,
-                scheduler,
                 criterion,
                 train_dataloader,
                 epoch,
                 train_metrics,
                 return_preds=True,
             )
-            
-            if rank == 0 and experiment is not None:
-                log_experiment(args, experiment, train_metrics, train_loss, epoch, y_true_train, y_pred_train, mode="train")
 
-                # Log learning rate for this epoch
-                current_lr = optimizer.param_groups[0]['lr']
-                experiment.log_metric(f"learning_rate", current_lr, step=epoch)
-                
-                if (epoch >= args.epochs-1) or (epoch % args.print_freq == 0):                    
-                    if any(m in args.model_name.lower() for m in ["vit", "swin"]):
-                        plot_attention_maps(args, experiment, model, train_dataloader, epoch, mode="train")
-                    else:
-                        plot_cam(args, experiment, model, train_dataloader, epoch, mode="train")
-                        
             val_loss, val_acc, y_true, y_pred = test_model(
                 args,
                 model,
                 optimizer,
-                scheduler,
                 criterion,
                 val_dataloader,
                 epoch,
                 val_metrics,
                 return_preds=True,
             )        
-
+            
+            if args.ddp:
+                dist.all_reduce(train_loss_t := torch.tensor(train_loss, device=args.device), op=dist.ReduceOp.AVG)
+                dist.all_reduce(val_loss_t := torch.tensor(val_loss, device=args.device), op=dist.ReduceOp.AVG)
+                
+                train_loss, val_loss = train_loss_t.item(), val_loss_t.item()
+                
+                if (epoch >= args.epochs - 1) or (epoch % args.print_freq == 0):
+                        # train gather
+                        y_true_train = gather_tensor(args, y_true_train)
+                        y_pred_train = gather_tensor(args, y_pred_train)
+                        
+                        # val gather
+                        y_true = gather_tensor(args, y_true)
+                        y_pred = gather_tensor(args, y_pred)
+                        
+            stop_signal = torch.tensor(0, device=args.device)
+            
             if rank == 0 and experiment is not None:
+                log_experiment(args, experiment, train_metrics, train_loss, epoch, y_true_train, y_pred_train, mode="train")
                 log_experiment(args, experiment, val_metrics, val_loss, epoch, y_true, y_pred, mode="val")
-
-                # Step lr scheduler
-                scheduler.step(val_loss)
-                #dist.barrier()
+                # Log learning rate for this epoch
+                current_lr = optimizer.param_groups[0]['lr']
+                experiment.log_metric(f"learning_rate", current_lr, step=epoch)                
                 
                 # Output intermediate statistics
                 if ((epoch >= args.epochs - 1) or (epoch % args.print_freq == 0)):
-                    #print("\nVal Accuracy: %.5f \tVal Loss: %.5f" % (val_acc, val_loss), flush=True)
+                    cam_model = model.module if hasattr(model, "module") else model
                     if any(m in args.model_name.lower() for m in ["vit", "swin"]):
-                        plot_attention_maps(args, experiment, model, val_dataloader, epoch, mode="val")
+                        plot_attention_maps(args, experiment, cam_model, train_dataloader, epoch, mode="train")
+                        plot_attention_maps(args, experiment, cam_model, val_dataloader, epoch, mode="val")
                     else:
-                        plot_cam(args, experiment, model, val_dataloader, epoch, mode="val")                        
+                        plot_cam(args, experiment, cam_model, train_dataloader, epoch, mode="train")
+                        plot_cam(args, experiment, cam_model, val_dataloader, epoch, mode="val")                        
                         
                 epoch_pbar.set_postfix({"Train Loss": train_loss, "Val Loss": val_loss, "Val acc": val_acc})
                 
                 # Check Early Stopping
                 if epoch > 1:
-                    early_stopping(val_loss, model, epoch, experiment)
+                    early_stopping(val_loss, model)
                     if early_stopping.early_stop:
                         if isinstance(val_acc, list):
                             acc_str = ", ".join([f"{a:.3f}" for a in val_acc])
@@ -229,17 +257,32 @@ def main(args, experiment, dataloaders, rank):
                         print(
                             f"\nStopped at Epoch: {epoch} \tVal Accuracy: {acc_str} \tVal Loss: {val_loss:.5f}"
                         )
-                        
-                        model.load_state_dict(early_stopping.best_weights)
-                        args.epochs = epoch + 1
-                        break
+                        stop_signal += 1
+            if args.ddp:
+                dist.broadcast(stop_signal, src=0)
+                
+            if stop_signal.item() > 0:
+                if args.ddp:
+                    if rank == 0:
+                        model.module.load_state_dict(early_stopping.best_weights)
+                    for tensor in model.module.state_dict().values():
+                        dist.broadcast(tensor, src=0)
+                else:
+                    model.load_state_dict(early_stopping.best_weights)
+
+                args.epochs = epoch + 1
+                break
+            
+            # Step lr scheduler
+            scheduler.step(val_loss)
+        
+        if args.ddp: dist.barrier(device_ids=[args.gpu[rank]])
         
         # Test model
         test_loss, test_acc, y_true, y_pred = test_model(
             args,
             model,
             optimizer,
-            scheduler,
             criterion,
             test_dataloader,
             epoch,
@@ -247,13 +290,19 @@ def main(args, experiment, dataloaders, rank):
             return_preds=True,
             task="test",
         ) 
+        if args.ddp:
+            y_true = gather_tensor(args, y_true)
+            y_pred = gather_tensor(args, y_pred)        
+            dist.all_reduce(test_loss_t := torch.tensor(test_loss, device=args.device), op=dist.ReduceOp.AVG)
+            test_loss = test_loss_t.item()
                
         if rank == 0 and experiment is not None:
             log_experiment(args, experiment, test_metrics, test_loss, epoch, y_true, y_pred, mode="test")
+            cam_model = model.module if hasattr(model, "module") else model
             if any(m in args.model_name.lower() for m in ["vit", "swin"]):
                 plot_attention_maps(args, experiment, model, test_dataloader, epoch, mode="test")
             else:
-                plot_cam(args, experiment, model, test_dataloader, epoch,mode="test")
+                plot_cam(args, experiment, cam_model, test_dataloader, epoch,mode="test")
                 
             if isinstance(test_acc, list):
                 acc_str = ", ".join([f"{a:.3f}" for a in test_acc])
@@ -284,38 +333,49 @@ def main(args, experiment, dataloaders, rank):
 
 
 if __name__ == "__main__":
-    
+    torch.cuda.empty_cache()
     args = parse_args("./configs/default_config.yaml", desc="single_task")
     
-    # set random seeds
-    torch.manual_seed(args.random_seed)
-    np.random.seed(args.random_seed)
-    random.seed(args.random_seed)
-    torch.cuda.manual_seed_all(args.random_seed) 
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+    #os.environ["CUDA_LAUNCH_BLOCKING"]="1"
     
-    os.environ["CUDA_LAUNCH_BLOCKING"]="1"
+    # set rank
+    if "RANK" in os.environ:
+        rank = int(os.environ["RANK"])
+    else:
+        rank = 0
     
     # set device
-    if args.dataparallel or args.ddp:
+    if args.gpu and torch.cuda.is_available():
         os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(map(str, args.gpu))
-        args.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        print(f"Multi-GPU enabled. Using GPUs: {args.gpu}")
+
+        if args.dataparallel or args.ddp:
+            if rank==0: print(f"Multi-GPU enabled. Using GPUs: {args.gpu}")
+            args.gpu = list(range(len(args.gpu))) 
+        else:
+            print(f"Single-GPU mode. Using GPU {args.gpu[0]}")
+            torch.cuda.set_device(f"cuda:{args.gpu[rank]}")
+            args.device = torch.device(f"cuda:{args.gpu[rank]}")
     else:
-        os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu[0])
-        args.device = torch.device(f"cuda:{args.gpu[0]}" if torch.cuda.is_available() and args.gpu else "cpu")
-        print(f"Single-device mode. Using device: {args.device}")
-        args.device = torch.device(f"cuda" if torch.cuda.is_available() else "cpu")
-    
+        args.device = torch.device("cpu")
+        print("Using CPU.")
+
     if args.ddp:
         args.world_size = len(args.gpu)
         args.lr = args.lr * args.world_size
-        args.batch_size = args.batch_size * args.world_size
+        args.batch_size = args.batch_size // args.world_size
         
-        mp.spawn(main_worker, args=((args,)), nprocs=args.world_size,)
+        signal.signal(signal.SIGTERM, handle_sigterm)
+        signal.signal(signal.SIGINT, handle_sigterm)
+        
+        try:
+            mp.spawn(main_worker, args=(args,), nprocs=args.world_size)
+        except Exception as e:
+            print(f"Training failed: {e}")
+            if dist.is_initialized():
+                dist.destroy_process_group()
+            raise
+    
     else:
-        # Single GPU or DataParallel logic
-        main_worker(0, args)    
+        main_worker(0, args)
         
     torch.cuda.empty_cache()
