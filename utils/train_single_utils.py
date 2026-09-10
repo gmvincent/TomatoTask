@@ -81,7 +81,6 @@ def test_model(
     epoch,
     test_metrics=None,
     return_preds=False,
-    task="val",
 ):
 
     model.eval()
