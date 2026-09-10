@@ -23,39 +23,71 @@ class PredictionTime(torchmetrics.Metric):
 
     def reset(self):
         super().reset()
-
-def initialize_metrics(args):
-    def build_metrics(num_classes):
-        metrics = {
-            "Accuracy": torchmetrics.Accuracy(num_classes=num_classes, task="multiclass"),
-            #"F1": torchmetrics.F1Score(average="none", num_classes=num_classes, task="multiclass"),
-            "Recall_macro": torchmetrics.Recall(average="macro", num_classes=num_classes, task="multiclass"), # also called Sensitivity
-            "Precision_macro": torchmetrics.Precision(average="macro", num_classes=num_classes, task="multiclass"),
-            "Specificity_macro": torchmetrics.Specificity(average="macro", num_classes=num_classes, task="multiclass"),
-            "F1_macro": torchmetrics.F1Score(average="macro", num_classes=num_classes, task="multiclass"),
-            "MCC": torchmetrics.MatthewsCorrCoef(num_classes=num_classes, task="multiclass"),
-            "PredictionTime": PredictionTime(),
-        }
-
-        for metric in metrics.values():
-            metric.to(args.device)
-        return torchmetrics.MetricCollection(metrics)
         
-    if args.num_tasks in [1, "1", "tomato"]:
-        train_metrics = build_metrics(args.num_classes)
+def _build_classification_metrics(num_classes):
+    return {
+        "Accuracy": torchmetrics.Accuracy(num_classes=num_classes, task="multiclass"),
+        #"F1": torchmetrics.F1Score(average="none", num_classes=num_classes, task="multiclass"),
+        "Recall_macro": torchmetrics.Recall(average="macro", num_classes=num_classes, task="multiclass"),  # also called Sensitivity
+        "Precision_macro": torchmetrics.Precision(average="macro", num_classes=num_classes, task="multiclass"),
+        "Specificity_macro": torchmetrics.Specificity(average="macro", num_classes=num_classes, task="multiclass"),
+        "F1_macro": torchmetrics.F1Score(average="macro", num_classes=num_classes, task="multiclass"),
+        "MCC": torchmetrics.MatthewsCorrCoef(num_classes=num_classes, task="multiclass"),
+        "PredictionTime": PredictionTime(),
+    }
+ 
+def _build_regression_metrics(num_outputs):
+    return {
+        "MAE": torchmetrics.regression.MeanAbsoluteError(),
+        "MSE": torchmetrics.regression.MeanSquaredError(),
+        "RMSE": torchmetrics.regression.MeanSquaredError(squared=False),
+        "R2": torchmetrics.regression.R2Score(num_outputs=num_outputs),
+        "PearsonCorrCoef": torchmetrics.regression.PearsonCorrCoef(num_outputs=num_outputs),
+        "PredictionTime": PredictionTime(),
+    }
+
+def _build_segmentation_metrics(num_classes):
+    return {
+        "Accuracy": torchmetrics.Accuracy(num_classes=num_classes, task="multiclass"),
+        "IoU_macro": torchmetrics.JaccardIndex(num_classes=num_classes, task="multiclass", average="macro"),
+        "Recall_macro": torchmetrics.Recall(average="macro", num_classes=num_classes, task="multiclass"),  # also called Sensitivity
+        "Precision_macro": torchmetrics.Precision(average="macro", num_classes=num_classes, task="multiclass"),
+        "Specificity_macro": torchmetrics.Specificity(average="macro", num_classes=num_classes, task="multiclass"),
+        "F1_macro": torchmetrics.F1Score(num_classes=num_classes, task="multiclass", average="macro"),
+        "PredictionTime": PredictionTime(),
+    }
+    
+def build_metrics(args, task, num_classes):
+    _METRIC_BUILDERS = {
+        "classification": _build_classification_metrics,
+        "regression": _build_regression_metrics,
+        "segmentation": _build_segmentation_metrics,
+    }
+    
+    if task not in _METRIC_BUILDERS:
+        raise ValueError(f"Unsupported task '{task}'. Use one of: {sorted(_METRIC_BUILDERS)}.")
+    metrics = _METRIC_BUILDERS[task](num_classes)
+
+    for metric in metrics.values():
+        metric.to(args.device)
+    return torchmetrics.MetricCollection(metrics)
+
+def initialize_metrics(args):        
+    if not isinstance(args.task, list):
+        # Single-task setup
+        train_metrics = build_metrics(args, args.task, args.num_classes)
         val_metrics, test_metrics = train_metrics.clone(), train_metrics.clone()
-        return train_metrics, val_metrics, test_metrics
     else:
         # Multi-task setup
-        train_metrics = []
-        for num_classes in args.num_classes:  # args.classes should be a list of class counts per task
-            train_metrics.append(build_metrics(num_classes))
+        train_metrics = [
+            build_metrics(args, task, num_classes)
+            for task, num_classes in zip(args.task, args.num_classes)
+        ]
         val_metrics = [tm.clone() for tm in train_metrics]
         test_metrics = [tm.clone() for tm in train_metrics]
-        return train_metrics, val_metrics, test_metrics
     
-
-
+    return train_metrics, val_metrics, test_metrics
+    
 def log_metrics(experiment, metrics, loss, step, mode="train"):
     if isinstance(metrics, list):  # Multi-task
         for task_idx, task_metrics in enumerate(metrics):
