@@ -32,7 +32,15 @@ warnings.filterwarnings("ignore", category=FutureWarning, module="sklearn.manifo
 def create_experiment(args):
     now = datetime.datetime.now()
     
-    experiment_name = f"{args.model_name}_{args.num_tasks}task_{args.dataset_name}_{now.strftime('%y%m%d%H%M')}"
+    if isinstance(args.task, list):
+        mode = "multi"
+    elif args.mode == "classification":
+        mode = "clf"
+    elif args.mode == "segmentation":
+        mode = "seg"
+    elif args.mode == "regression":
+        mode = "reg"
+    experiment_name = f"{args.model_name}_{mode}_{args.num_tasks}task_{args.dataset_name}_{now.strftime('%y%m%d%H%M')}"
     
     experiment = Experiment(
         api_key="6XqmAhuJUkx6wPhz0sdCRXwRz",
