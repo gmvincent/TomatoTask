@@ -58,18 +58,17 @@ def main_worker(rank, args):
         if rank==0: print("Creating Dataloaders", flush=True)
         train_dataloader, val_dataloader, test_dataloader, classes_dict  = create_data_loader(args, rank) 
         
-        if args.num_tasks in ["1", "tomato"]:
+        if not isinstance(args.task, list): # single-task
             args.classes = list(classes_dict.values())
             args.num_classes = len(args.classes)
-        else:
+        else: # multi-task
             args.classes = [[v for v in inner.values()] for inner in classes_dict.values()] # list of each task classes
             args.num_classes = [len(class_lst) for class_lst in args.classes]
-            
-        if args.num_tasks == "1v2":    
-            for i in args.num_classes:
-                _, _, _ = main(args, experiment, [train_dataloader, val_dataloader, test_dataloader], rank)
-        else:
-            _, _, _ = main(args, experiment, [train_dataloader, val_dataloader, test_dataloader], rank)
+        
+        if isinstance(args.task, list) and len(args.task) != len(args.num_classes):
+            raise ValueError(f"len(task)={len(args.task)} != len(num_classes)={len(args.num_classes)}.")
+        
+        _, _, _ = main(args, experiment, [train_dataloader, val_dataloader, test_dataloader], rank)
         
     except Exception as e:
         print(f"Rank {rank} failed: {e}")
@@ -109,17 +108,10 @@ def main(args, experiment, dataloaders, rank):
     
     if args.ddp: dist.barrier(device_ids=[args.gpu[rank]])
     
-    single_task = False
-    if args.num_tasks in ["1", "tomato"]:
-        single_task = True
+    single_task = not isinstance(args.task, list)
     
-        # get number of features
-        images, _ = next(iter(train_dataloader))  
-    elif args.num_tasks in ["2", "2_tomato", "1v2"]:
-        images, _, _ = next(iter(train_dataloader))
-    else:
-        images, _, _, _ = next(iter(train_dataloader))  
-        
+    batch = next(iter(train_dataloader))  
+    images = batch[0]
     args.input_channels = images.shape[1]
     
     # get model by name
@@ -143,20 +135,29 @@ def main(args, experiment, dataloaders, rank):
     if single_task:
         if args.model_name not in ["svm", "rf"]: #TODO: set-up traditional machine learning models
             train_model, test_model = model_functions["single"]
-    elif not single_task:
+    else:
         train_model, test_model = model_functions["multi"]
     
     # Initialize metrics
     train_metrics, val_metrics, test_metrics = initialize_metrics(args)
     
     # Early Stopping
-    early_stopping = EarlyStopping(patience=10, min_delta=1e-4)
+    early_stopping = EarlyStopping(patience=10, min_delta=1e-3)
     
     if rank==0: print("Begin Training", flush=True)
 
     # Train/Fit the Models
     if args.model_name not in ["svm", "rf"]:
-        criterion = torch.nn.CrossEntropyLoss()
+        
+        criterion_map = {
+            "regression": torch.nn.MSELoss(),
+            "classification": torch.nn.CrossEntropyLoss(),
+            "segmentation": torch.nn.CrossEntropyLoss(),
+        }
+        if single_task:
+            criterion = criterion_map[args.task]
+        else:
+            criterion = [criterion_map[t]() for t in args.task]
         
         if args.optimizer_name == 'Adam':
             optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
@@ -164,6 +165,7 @@ def main(args, experiment, dataloaders, rank):
             optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=args.weight_decay)
         
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, "min", patience=5, factor=0.25) 
+        #scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=1e-4)
         
         model = model.to(args.device)        
         
@@ -217,13 +219,13 @@ def main(args, experiment, dataloaders, rank):
                 train_loss, val_loss = train_loss_t.item(), val_loss_t.item()
                 
                 if (epoch >= args.epochs - 1) or (epoch % args.print_freq == 0):
-                        # train gather
-                        y_true_train = gather_tensor(args, y_true_train)
-                        y_pred_train = gather_tensor(args, y_pred_train)
-                        
-                        # val gather
-                        y_true = gather_tensor(args, y_true)
-                        y_pred = gather_tensor(args, y_pred)
+                    # train gather
+                    y_true_train = gather_tensor(args, y_true_train)
+                    y_pred_train = gather_tensor(args, y_pred_train)
+                    
+                    # val gather
+                    y_true = gather_tensor(args, y_true)
+                    y_pred = gather_tensor(args, y_pred)
                         
             stop_signal = torch.tensor(0, device=args.device)
             
@@ -288,7 +290,6 @@ def main(args, experiment, dataloaders, rank):
             epoch,
             test_metrics,
             return_preds=True,
-            task="test",
         ) 
         if args.ddp:
             y_true = gather_tensor(args, y_true)
