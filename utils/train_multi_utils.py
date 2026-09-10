@@ -15,35 +15,40 @@ def train_model(
 
     # number of tasks
     multi_task = len(args.num_classes)
-    
+    weights = getattr(args, "task_weights", None) or [1.0] * multi_task
+
     y_pred = [[] for _ in range(multi_task)]
     y_true = [[] for _ in range(multi_task)]
         
-    running_loss, running_samples = 0, 0
+    running_loss, running_samples = 0.0, 0
     if train_metrics is None:
         running_correct = [0 for _ in range(multi_task)]
 
     for batch, data in enumerate(train_dataloader):
-        
-        input = data[0]
-        input = input.to(args.device).float()  
-        
+        input = data[0].to(args.device).float()  
         batch_size = input.size(0)
+        
         optimizer.zero_grad()
         
         loss = 0
         for idx in range(multi_task):
+            task = args.task[idx]
             labels = data[idx+1]
-            labels = labels.to(args.device).long()      
+            label_dtype = torch.float if task == "regression" else torch.long
+            labels = labels.to(args.device).to(label_dtype)    
             
             start_time = time.time()
             output = model(input, task_idx=idx)
             end_time = time.time()
             
-            task_loss = criterion(output, labels)
-            loss += task_loss
+            task_loss = criterion[idx](output, labels)
+            loss = loss + weights[idx] * task_loss
             
-            preds = output.argmax(dim=1)
+            if task == "regression":
+                preds = output.detach() 
+            else:
+                preds = output.argmax(dim=1)
+                
             y_true[idx].append(labels)
             y_pred[idx].append(preds)
             
@@ -54,7 +59,7 @@ def train_model(
                         metric.update(start_time, end_time, batch_size=batch_size)
                     else:
                         metric.update(output, labels)
-            else:
+            elif task != "regression":
                 running_correct[idx] += (preds == labels).sum().item()
                         
         loss.backward()
@@ -72,10 +77,9 @@ def train_model(
     # compute metrics at the end of this epoch
     if train_metrics is not None:
         metrics_dict = [tm.compute() for tm in train_metrics]
-        epoch_acc = [m["Accuracy"].item() for m in metrics_dict]
+        epoch_acc = [m["Accuracy"].item() if t != "regression" else m["MAE"].item() for t, m in zip(args.task, metrics_dict)]
     else:
-        epoch_acc = [correct / running_samples for correct in running_correct]
-
+        epoch_acc = [correct / running_samples if t != "regression" else float("nan") for t, correct in zip(args.task, running_correct)]
 
     if return_preds:
         return epoch_loss, epoch_acc, y_true, y_pred
@@ -97,35 +101,39 @@ def test_model(
 
     # number of tasks
     multi_task = len(args.num_classes)
-        
+    weights = getattr(args, "task_weights", None) or [1.0] * multi_task
+    
     y_pred = [[] for _ in range(multi_task)]
     y_true = [[] for _ in range(multi_task)]
         
-    running_loss, running_samples = 0, 0
+    running_loss, running_samples = 0.0, 0
     if test_metrics is None:
         running_correct = [0 for _ in range(multi_task)]
         
     with torch.no_grad():
         for batch, data in enumerate(test_dataloader):
-            input = data[0]
-            input = input.to(args.device).float()  
-            
+            input = data[0].to(args.device).float()  
             batch_size = input.size(0)
             
             loss = 0
-
             for idx in range(multi_task):
+                task = args.task[idx]
                 labels = data[idx+1]
-                labels = labels.to(args.device).long()      
+                label_dtype = torch.float if task == "regression" else torch.long
+                labels = labels.to(args.device).to(label_dtype)  
 
                 start_time = time.time()
                 output = model(input, task_idx=idx)
                 end_time = time.time()
 
-                task_loss = criterion(output, labels)
-                loss += task_loss
+                task_loss = criterion[idx](output, labels)
+                loss = loss + weights[idx] * task_loss
+            
+                if task == "regression":
+                    preds = output.detach() 
+                else:
+                    preds = output.argmax(dim=1)
                 
-                preds = output.argmax(dim=1)
                 y_true[idx].append(labels)
                 y_pred[idx].append(preds)
                 
@@ -136,7 +144,7 @@ def test_model(
                             metric.update(start_time, end_time, batch_size=batch_size)
                         else:
                             metric.update(output, labels)
-                else:
+                elif task != "regression":
                     running_correct[idx] += (preds == labels).sum().item()
 
             running_loss += loss.item() * batch_size
@@ -151,9 +159,9 @@ def test_model(
     # compute metrics at the end of this epoch
     if test_metrics is not None:
         metrics_dict = [tm.compute() for tm in test_metrics]
-        epoch_acc = [m["Accuracy"].item() for m in metrics_dict]
+        epoch_acc = [m["Accuracy"].item() if t != "regression" else m["MAE"].item() for t, m in zip(args.task, metrics_dict)]
     else:
-        epoch_acc = [correct / running_samples for correct in running_correct]
+        epoch_acc = [correct / running_samples if t != "regression" else float("nan") for t, correct in zip(args.task, running_correct)]
 
 
     if return_preds:
