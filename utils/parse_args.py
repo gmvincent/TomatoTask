@@ -1,7 +1,6 @@
 import argparse
 import os
 import torch
-import torch
 import torch.distributed as dist
 
 from .yaml_config_hook import yaml_config_hook
@@ -58,8 +57,54 @@ def parse_args(config=None, desc="Multi-Task", **kwargs):
     for k, v in vars(args).items():
         if k in bool_configs and isinstance(v, str):
             if v.lower() in ["yes", "no", "true", "false", "none"]:
-                exec(f'args.{k} = v.lower() in ["yes", "true"]')
+                setattr(args, k, v.lower() in ["yes", "true"])
 
+    # multi-task setup
+    if isinstance(args.task, list):
+        if args.num_tasks in ["1", "tomato"]:
+            if len(args.task) != 1:
+                raise ValueError(f"num_tasks='{args.num_tasks}' is single-task but got {len(args.task)} tasks: {args.task}")
+            args.task = args.task[0]
+        elif args.num_tasks in ["2", "3"]:
+            if len(args.task) != int(args.num_tasks):  
+                raise ValueError(f"num_tasks='{args.num_tasks}' is single-task but got {len(args.task)} tasks: {args.task}")
+        elif args.num_tasks == "2_tomato":
+            if len(args.task) != 2:    
+                raise ValueError(f"num_tasks='{args.num_tasks}' is single-task but got {len(args.task)} tasks: {args.task}")
+        else:
+            raise ValueError(f"Unrecognized num_tasks='{args.num_tasks}'.")
+    else: 
+        if args.num_tasks not in ["1", "tomato"]:
+            raise ValueError(f"task='{args.task}' is a single value but num_tasks='{args.num_tasks}' indicates multi-task; pass a list of tasks instead.")
+
+    # if tasks is a list ensure that each item in list is one of ["classification", "regression", "segmentation"]  
+    _valid_tasks = {"classification", "regression", "segmentation"}
+    _check = args.task if isinstance(args.task, list) else [args.task]
+    _bad = [t for t in _check if t not in _valid_tasks]
+    if _bad:
+        raise ValueError(f"Unsupported task(s) {_bad}. Use one of: {sorted(_valid_tasks)}.")
+    
+    # data specific multi task set up        
+    dataset_tasks = {
+        ("plantdoc", "2"):            ["classification", "classification"],
+        ("plantvillage", "2"):        ["classification", "classification"],
+        ("aichallenger", "2_tomato"): ["classification", "classification"],
+        ("aichallenger", "3"):        ["classification", "classification", "classification"],
+        ("tomatotask", "3"):          ["classification", "segmentation", "segmentation"],
+        ("tomatotask2d_rgb", "3"):    ["classification", "segmentation", "segmentation"],
+        ("tomatotask2d_rgbd", "3"):   ["classification", "segmentation", "segmentation"],
+        ("tomatotask2d_rgb", "2"):    ["classification", "regression"],
+        ("tomatotask2d_rgbd", "2"):   ["classification", "regression"],
+        ("tomatotask3d", "2"):        ["classification", "regression"],
+    }
+ 
+    key = (args.dataset_name.lower(), args.num_tasks)
+    expected = dataset_tasks.get(key)
+    if expected is not None and args.task != expected:
+        print(f"For dataset '{args.dataset_name}' with num_tasks='{args.num_tasks}', tasks are fixed to {expected}, not {args.task}.")
+        args.task = expected
+            
+    # gpu setup
     args.master_port = find_free_port()
 
     # Ensure output path exists
@@ -73,6 +118,7 @@ def parse_args(config=None, desc="Multi-Task", **kwargs):
         args.gpu = [int(args.gpu[0])]
     if not args.world_size:  # Infer world_size from number of GPUs
         args.world_size = len(args.gpu)
+    # TODO: catch if gpu number is two digits    
         
     # Validate dataparallel or ddp and GPU arguments
     if args.dataparallel and len(args.gpu) < 2:
