@@ -21,7 +21,10 @@ def train_model(
     for batch, data in enumerate(train_dataloader):
         instances, labels = data
         instances = instances.to(args.device).float()  
-        labels = labels.to(args.device).long()      
+        if args.task == "regression":
+            labels = labels.to(args.device).float()
+        else:
+            labels = labels.to(args.device).long()
 
         batch_size = instances.size(0)
         
@@ -36,7 +39,10 @@ def train_model(
         loss.backward()
         optimizer.step()
         
-        preds = output.argmax(dim=1)
+        if args.task == "regression":
+            preds = output.detach() 
+        else:
+            preds = output.argmax(dim=1)
         running_loss += loss.item() * batch_size
         running_samples += batch_size
 
@@ -45,6 +51,8 @@ def train_model(
             for name, metric in train_metrics.items():
                 if name == "PredictionTime":
                     metric.update(start_time, end_time, batch_size=batch_size)
+                elif name == "Dice":
+                    metric.update(preds, labels)
                 else:
                     metric.update(output, labels)
         else:
@@ -63,9 +71,9 @@ def train_model(
     # compute metrics at the end of this epoch
     if train_metrics is not None:
         metrics_dict = train_metrics.compute()
-        epoch_acc = metrics_dict["Accuracy"].item()
+        epoch_acc = metrics_dict["Accuracy"].item() if args.task != "regression" else metrics_dict["MAE"].item()
     else:
-        epoch_acc = (running_correct / running_samples)
+        epoch_acc = (running_correct / running_samples) if args.task != "regression" else float("nan")
 
     if return_preds:
         return epoch_loss, epoch_acc, y_true, y_pred
@@ -82,7 +90,6 @@ def test_model(
     test_metrics=None,
     return_preds=False,
 ):
-
     model.eval()
 
     y_pred, y_true  = [], []
@@ -94,7 +101,10 @@ def test_model(
         for batch, data in enumerate(test_dataloader):
             instances, labels = data
             instances = instances.to(args.device).float()  
-            labels = labels.to(args.device).long()
+            if args.task == "regression":
+                labels = labels.to(args.device).float()
+            else:
+                labels = labels.to(args.device).long()
             
             batch_size = instances.size(0)     
 
@@ -104,7 +114,10 @@ def test_model(
             
             loss = criterion(output, labels)
 
-            preds = output.argmax(dim=1)
+            if args.task == "regression":
+                preds = output.detach() 
+            else:
+                preds = output.argmax(dim=1)
             running_loss += loss.item() * batch_size
             running_samples += batch_size
 
@@ -113,6 +126,8 @@ def test_model(
                 for name, metric in test_metrics.items():
                     if name == "PredictionTime":
                         metric.update(start_time, end_time, batch_size=batch_size)
+                    elif name == "Dice":
+                        metric.update(preds, labels)
                     else:
                         metric.update(output, labels)
             else:
@@ -131,9 +146,9 @@ def test_model(
     # compute metrics at the end of this epoch
     if test_metrics is not None:
         metrics_dict = test_metrics.compute()
-        epoch_acc = metrics_dict["Accuracy"].item()
+        epoch_acc = metrics_dict["Accuracy"].item() if args.task != "regression" else metrics_dict["MAE"].item()
     else:
-        epoch_acc = (running_correct / running_samples)
+        epoch_acc = (running_correct / running_samples) if args.task != "regression" else float("nan")
 
     if return_preds:
         return epoch_loss, epoch_acc, y_true, y_pred
