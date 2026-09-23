@@ -17,7 +17,7 @@ from tqdm import tqdm
 import torch.multiprocessing as mp
 import torch.distributed as dist
 
-from utils.cometml_logger import create_experiment, log_experiment, log_model_weights, plot_distribution, plot_cam, plot_attention_maps
+from utils.cometml_logger import create_experiment, log_experiment, log_model_weights, plot_distribution
 from utils import parse_args, setup_ddp, cleanup_ddp, set_seed, handle_sigterm
 from utils.metrics import initialize_metrics, log_metrics, gather_tensor
 from utils.early_stopping import EarlyStopping
@@ -102,9 +102,9 @@ def main(args, experiment, dataloaders, rank):
             plot_val_loader = val_dataloader
             plot_test_loader = test_dataloader
 
-        plot_distribution(args, experiment, plot_train_loader, args.classes, mode="train")
-        plot_distribution(args, experiment, plot_val_loader, args.classes, mode="val")
-        plot_distribution(args, experiment, plot_test_loader, args.classes, mode="test")
+        plot_distribution(args, experiment, plot_train_loader, mode="train")
+        plot_distribution(args, experiment, plot_val_loader, mode="val")
+        plot_distribution(args, experiment, plot_test_loader, mode="test")
     
     if args.ddp: dist.barrier(device_ids=[args.gpu[rank]])
     
@@ -229,23 +229,15 @@ def main(args, experiment, dataloaders, rank):
                         
             stop_signal = torch.tensor(0, device=args.device)
             
+            # Output intermediate statistics
             if rank == 0 and experiment is not None:
-                log_experiment(args, experiment, train_metrics, train_loss, epoch, y_true_train, y_pred_train, mode="train")
-                log_experiment(args, experiment, val_metrics, val_loss, epoch, y_true, y_pred, mode="val")
+                log_experiment(args, experiment, model, train_dataloader, train_metrics, train_loss, epoch, y_true_train, y_pred_train, mode="train")
+                log_experiment(args, experiment, model, val_dataloader, val_metrics, val_loss, epoch, y_true, y_pred, mode="val")
+                
                 # Log learning rate for this epoch
                 current_lr = optimizer.param_groups[0]['lr']
                 experiment.log_metric(f"learning_rate", current_lr, step=epoch)                
-                
-                # Output intermediate statistics
-                if ((epoch >= args.epochs - 1) or (epoch % args.print_freq == 0)):
-                    cam_model = model.module if hasattr(model, "module") else model
-                    if any(m in args.model_name.lower() for m in ["vit", "swin"]):
-                        plot_attention_maps(args, experiment, cam_model, train_dataloader, epoch, mode="train")
-                        plot_attention_maps(args, experiment, cam_model, val_dataloader, epoch, mode="val")
-                    else:
-                        plot_cam(args, experiment, cam_model, train_dataloader, epoch, mode="train")
-                        plot_cam(args, experiment, cam_model, val_dataloader, epoch, mode="val")                        
-                        
+                     
                 epoch_pbar.set_postfix({"Train Loss": train_loss, "Val Loss": val_loss, "Val acc": val_acc})
                 
                 # Check Early Stopping
@@ -298,13 +290,7 @@ def main(args, experiment, dataloaders, rank):
             test_loss = test_loss_t.item()
                
         if rank == 0 and experiment is not None:
-            log_experiment(args, experiment, test_metrics, test_loss, epoch, y_true, y_pred, mode="test")
-            cam_model = model.module if hasattr(model, "module") else model
-            if any(m in args.model_name.lower() for m in ["vit", "swin"]):
-                plot_attention_maps(args, experiment, model, test_dataloader, epoch, mode="test")
-            else:
-                plot_cam(args, experiment, cam_model, test_dataloader, epoch,mode="test")
-                
+            log_experiment(args, experiment, model, test_dataloader, test_metrics, test_loss, epoch, y_true, y_pred, mode="test")          
             if isinstance(test_acc, list):
                 acc_str = ", ".join([f"{a:.3f}" for a in test_acc])
             else:
