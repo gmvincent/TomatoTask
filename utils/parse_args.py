@@ -93,8 +93,8 @@ def parse_args(config=None, desc="Multi-Task", **kwargs):
         ("tomatotask", "3"):          ["classification", "segmentation", "segmentation"],
         ("tomatotask2d_rgb", "3"):    ["classification", "segmentation", "segmentation"],
         ("tomatotask2d_rgbd", "3"):   ["classification", "segmentation", "segmentation"],
-        ("tomatotask2d_rgb", "2"):    ["classification", "regression"],
-        ("tomatotask2d_rgbd", "2"):   ["classification", "regression"],
+        #("tomatotask2d_rgb", "2"):    ["classification", "regression"],
+        #("tomatotask2d_rgbd", "2"):   ["classification", "regression"],
         ("tomatotask3d", "2"):        ["classification", "regression"],
     }
  
