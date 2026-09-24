@@ -21,6 +21,7 @@ from utils.cometml_logger import create_experiment, log_experiment, log_model_we
 from utils import parse_args, setup_ddp, cleanup_ddp, set_seed, handle_sigterm
 from utils.metrics import initialize_metrics, gather_tensor
 from utils.early_stopping import EarlyStopping
+from utils.class_weights import class_pixel_counts, class_weights
 
 from models.model_hub import get_model
 from data_utils import create_data_loader
@@ -112,6 +113,17 @@ def main(args, experiment, dataloaders, rank):
         plot_distribution(args, experiment, plot_val_loader, mode="val")
         plot_distribution(args, experiment, plot_test_loader, mode="test")
         
+        seg_weights = None
+        if args.task == "segmentation":
+            counts = class_pixel_counts(plot_train_loader, args.num_classes, args.device)
+            seg_weights = class_weights(counts, scheme="inverse_sqrt").to(args.device)
+            
+            #freq = (counts.double() / counts.sum()).tolist()
+            #print(f"Pixel counts: {counts.tolist()}  freq: {freq}  weights: {seg_weights.tolist()}")
+            experiment.log_parameters({
+                f"class_{i}_weight": w for i, w in enumerate(seg_weights.tolist())
+            })
+        
     if args.ddp: dist.barrier(device_ids=[args.gpu[rank]])
     
     single_task = not isinstance(args.task, list)
@@ -158,7 +170,7 @@ def main(args, experiment, dataloaders, rank):
         criterion_map = {
             "regression": torch.nn.MSELoss(),
             "classification": torch.nn.CrossEntropyLoss(),
-            "segmentation": torch.nn.CrossEntropyLoss(),
+            "segmentation": torch.nn.CrossEntropyLoss(weight=seg_weights),
         }
         if single_task:
             criterion = criterion_map[args.task]

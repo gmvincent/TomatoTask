@@ -46,9 +46,10 @@ def _build_regression_metrics(num_outputs):
         "PredictionTime": PredictionTime(),
     }
 
-def _build_segmentation_metrics(num_classes, foreground_idx=1):
+def _build_segmentation_metrics(num_classes):
     return {
         "Accuracy": torchmetrics.Accuracy(num_classes=num_classes, task="multiclass"),
+        "BalancedAccuracy": torchmetrics.Accuracy(average="macro", num_classes=num_classes, task="multiclass"),
         "IoU": torchmetrics.JaccardIndex(num_classes=num_classes, task="multiclass", average=None),
         #"Dice": torchmetrics.Dice(num_classes=num_classes, average=None, input_format="index"),
         "Recall": torchmetrics.Recall(average=None, num_classes=num_classes, task="multiclass"),  # also called Sensitivity
