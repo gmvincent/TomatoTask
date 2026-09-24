@@ -28,10 +28,10 @@ def _build_classification_metrics(num_classes):
     return {
         "Accuracy": torchmetrics.Accuracy(num_classes=num_classes, task="multiclass"),
         "F1Score": torchmetrics.F1Score(average=None, num_classes=num_classes, task="multiclass"),
-        "Recall_macro": torchmetrics.Recall(average=None, num_classes=num_classes, task="multiclass"),  # also called Sensitivity
-        "Precision_macro": torchmetrics.Precision(average=None, num_classes=num_classes, task="multiclass"),
-        "Specificity_macro": torchmetrics.Specificity(average=None, num_classes=num_classes, task="multiclass"),
-        "F1_macro": torchmetrics.F1Score(average=None, num_classes=num_classes, task="multiclass"),
+        "Recall": torchmetrics.Recall(average=None, num_classes=num_classes, task="multiclass"),  # also called Sensitivity
+        "Precision": torchmetrics.Precision(average=None, num_classes=num_classes, task="multiclass"),
+        "Specificity": torchmetrics.Specificity(average=None, num_classes=num_classes, task="multiclass"),
+        "F1_macro": torchmetrics.F1Score(average="macro", num_classes=num_classes, task="multiclass"),
         "MCC": torchmetrics.MatthewsCorrCoef(num_classes=num_classes, task="multiclass"),
         "PredictionTime": PredictionTime(),
     }
@@ -41,8 +41,8 @@ def _build_regression_metrics(num_outputs):
         "MAE": torchmetrics.regression.MeanAbsoluteError(),
         "MSE": torchmetrics.regression.MeanSquaredError(),
         "RMSE": torchmetrics.regression.MeanSquaredError(squared=False),
-        "R2": torchmetrics.regression.R2Score(num_outputs=num_outputs),
-        "PearsonCorrCoef": torchmetrics.regression.PearsonCorrCoef(num_outputs=num_outputs),
+        "R2": torchmetrics.regression.R2Score(), #num_outputs=num_outputs),
+        "PearsonCorrCoef": torchmetrics.regression.PearsonCorrCoef(), #num_outputs=num_outputs),
         "PredictionTime": PredictionTime(),
     }
 
@@ -50,7 +50,7 @@ def _build_segmentation_metrics(num_classes, foreground_idx=1):
     return {
         "Accuracy": torchmetrics.Accuracy(num_classes=num_classes, task="multiclass"),
         "IoU": torchmetrics.JaccardIndex(num_classes=num_classes, task="multiclass", average=None),
-        "Dice": torchmetrics.segmentation.DiceScore(num_classes=num_classes, average=None, input_format="index"),
+        #"Dice": torchmetrics.Dice(num_classes=num_classes, average=None, input_format="index"),
         "Recall": torchmetrics.Recall(average=None, num_classes=num_classes, task="multiclass"),  # also called Sensitivity
         "Precision": torchmetrics.Precision(average=None, num_classes=num_classes, task="multiclass"),
         "Specificity": torchmetrics.Specificity(average=None, num_classes=num_classes, task="multiclass"),
@@ -90,23 +90,23 @@ def initialize_metrics(args):
     
     return train_metrics, val_metrics, test_metrics
     
-def log_metrics(experiment, metrics, loss, step, mode="train"):
+def log_metrics(args, experiment, metrics, loss, step, mode="train"):
     
-    def _log(key, val):
+    def _log(key, val, task_classes):
         val = val.cpu().detach()
         if val.ndim > 0 and val.numel() > 1:
             for i, v_ in enumerate(val):
-                experiment.log_metric(f"{key}_class{i}", v_.item(), step=step)
+                experiment.log_metric(f"{key}_{task_classes[i]}", v_.item(), step=step)
         else:
             experiment.log_metric(key, val.item(), step=step)
         
     if isinstance(metrics, list):  # Multi-task
         for task_idx, task_metrics in enumerate(metrics):
             for name, value in task_metrics.items():
-                _log(f"{mode}/{name}_task{task_idx}", value.compute())
+                _log(f"{mode}/{name}_task{task_idx}", value.compute(), args.classes[task_idx])
     else:  # Single-task
         for name, value in metrics.items():
-            _log(f"{mode}/{name}", value.compute())
+            _log(f"{mode}/{name}", value.compute(), args.classes)
 
     # Log loss (shared across tasks or single)
     experiment.log_metric(f"{mode}/loss", loss if loss is not None else 0, step=step)
