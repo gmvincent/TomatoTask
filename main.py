@@ -19,7 +19,7 @@ import torch.distributed as dist
 
 from utils.cometml_logger import create_experiment, log_experiment, log_model_weights, plot_distribution
 from utils import parse_args, setup_ddp, cleanup_ddp, set_seed, handle_sigterm
-from utils.metrics import initialize_metrics, log_metrics, gather_tensor
+from utils.metrics import initialize_metrics, gather_tensor
 from utils.early_stopping import EarlyStopping
 
 from models.model_hub import get_model
@@ -59,10 +59,16 @@ def main_worker(rank, args):
         train_dataloader, val_dataloader, test_dataloader, classes_dict  = create_data_loader(args, rank) 
         
         if not isinstance(args.task, list): # single-task
-            args.classes = list(classes_dict.values())
+            args.classes = list(range(len(classes_dict)+3)) if args.task == "regression" else list(classes_dict.values())
             args.num_classes = len(args.classes)
         else: # multi-task
-            args.classes = [[v for v in inner.values()] for inner in classes_dict.values()] # list of each task classes
+            args.classes = []
+            for t in args.task:
+                if t == "regression":
+                    task_classes = list(range(len(classes_dict[t])+3))
+                else:
+                    task_classes = list(classes_dict[t].values())    
+                args.classes.append(task_classes) # list of each task classes
             args.num_classes = [len(class_lst) for class_lst in args.classes]
         
         if isinstance(args.task, list) and len(args.task) != len(args.num_classes):
@@ -89,13 +95,13 @@ def main(args, experiment, dataloaders, rank):
     if rank == 0 and args.dataset_name not in ["spirals", "graph_meshes"]:
         if args.ddp:
             plot_train_loader = torch.utils.data.DataLoader(
-                train_dataloader.dataset, batch_size=args.batch_size, shuffle=False, num_workers=0
+                train_dataloader.dataset, batch_size=args.batch_size, shuffle=False, num_workers=4
             )
             plot_val_loader = torch.utils.data.DataLoader(
-                val_dataloader.dataset, batch_size=args.batch_size, shuffle=False, num_workers=0
+                val_dataloader.dataset, batch_size=args.batch_size, shuffle=False, num_workers=4
             )
             plot_test_loader = torch.utils.data.DataLoader(
-                test_dataloader.dataset, batch_size=args.batch_size, shuffle=False, num_workers=0
+                test_dataloader.dataset, batch_size=args.batch_size, shuffle=False, num_workers=4
             )
         else:
             plot_train_loader = train_dataloader
@@ -105,7 +111,7 @@ def main(args, experiment, dataloaders, rank):
         plot_distribution(args, experiment, plot_train_loader, mode="train")
         plot_distribution(args, experiment, plot_val_loader, mode="val")
         plot_distribution(args, experiment, plot_test_loader, mode="test")
-    
+        
     if args.ddp: dist.barrier(device_ids=[args.gpu[rank]])
     
     single_task = not isinstance(args.task, list)
