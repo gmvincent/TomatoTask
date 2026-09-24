@@ -3,11 +3,13 @@ import json
 
 import torch
 import torchvision.models as models
+from torchvision.models.segmentation.deeplabv3 import DeepLabV3
+from models.model_heads import build_head, build_segmentation_model
 from models.multitask_torch import MultiTask_Model
-from models.model_heads import build_head, ViTSegmentationModel, SwinSegmentationModel
 
 model_file = os.path.join(os.path.dirname(__file__), "torch_hub_models.json")
-torch_hub_models = json.load(open(model_file, "r"))
+with open(model_file, "r") as f:
+    torch_hub_models = json.load(f)
 
 available_models = sorted(torch_hub_models.keys())
 
@@ -26,35 +28,32 @@ def get_model(args, model_name, single_task=True):
   
     model = _build_backbone(args, model_name)
     model = modify_input_layer(args, model_name, model)
- 
+    
     if single_task:
-        if args.task == "segmentation" and model_name.lower().startswith(("vit", "swin")):
-            if model_name.lower().startswith("vit"):
-                model = ViTSegmentationModel(model, args.num_classes)
-            else:  # swin
-                model = SwinSegmentationModel(model, args.num_classes)
+        if args.task == "segmentation":
+            model = build_segmentation_model(model, model_name, args.num_classes, in_channels=args.input_channels)
         else:
             model = modify_head(model, model_name, args.task, args.num_classes)
+            
     else:
-        # TODO: set up multi-task segmentation for `vit` and `swin` models
-        model = MultiTask_Model(model_name, model, args.num_classes, args.task)
+        model = MultiTask_Model(model_name, model, args.num_classes, args.task, in_channels=args.input_channels)
  
-    get_target_layer(args, model_name, model, single_task)
+    get_target_layer(args, model_name, model)
  
     return model
 
 def _build_backbone(args, model_name):
-    
-    if isinstance(args.pretrained, bool) and args.pretrained:
-        weights_enum = models.get_model_weights(model_name)
-        weights = weights_enum.DEFAULT
-        model = models.get_model(model_name, weights=weights)
-    
-    elif isinstance(args.pretrained, bool) and not args.pretrained:
-        model = models.get_model(model_name, weights=None)
+    tasks = args.task if isinstance(args.task, list) else [args.task]
+    kwargs = {}
+    if ("segmentation" in tasks) and (model_name.lower() in ["resnet50", "resnet101"]):
+            kwargs["replace_stride_with_dilation"] = [False, True, True]
+
+    if isinstance(args.pretrained, bool):
+        weights = models.get_model_weights(model_name).DEFAULT if args.pretrained else None
+        model = models.get_model(model_name, weights=weights, **kwargs)
     
     elif isinstance(args.pretrained, str) and os.path.isfile(args.pretrained):
-        model = models.get_model(model_name, weights=None)
+        model = models.get_model(model_name, weights=None, **kwargs)
         checkpoint = torch.load(args.pretrained, map_location='cpu')
         if 'state_dict' in checkpoint:
             model.load_state_dict(checkpoint['state_dict'], strict=False)
@@ -82,6 +81,7 @@ def _locate_head(model):
     raise ValueError("Unknown model architecture. Can't find classifier head.")
 
 def modify_head(model, model_name, task, num_classes):
+    """Classification & regression only. Segmentation goes through build_segmentation_model."""
     owner, attr, in_features = _locate_head(model)
     new_head = build_head(task, in_features, num_classes, model_name=model_name)
 
@@ -155,24 +155,27 @@ def modify_input_layer(args, model_name, model):
     raise ValueError(f"Unsupported architecture: {model_name}")
 
 
-def get_target_layer(args, model_name, model, single_task):
+def get_target_layer(args, model_name, model):
     model_name = model_name.lower()
 
+    # Segmentation and multi-task models both hold their trunk in `.backbone`
+    root = model.backbone if isinstance(model, (DeepLabV3, MultiTask_Model)) else model
+ 
     model_targets = {
-        "fasterrcnn": lambda m, st: m.backbone if st else m.encoder,
-        "resnet":     lambda m, st: m.layer4[-1] if st else m.encoder[-1],
-        "vgg":        lambda m, st: m.features[-1] if st else m.encoder[-1],
-        "dense":      lambda m, st: m.features[-1] if st else m.encoder[-1],
-        "mobile":     lambda m, st: m.features[-1] if st else m.encoder[-1],
-        "efficient":  lambda m, st: m.features[-1][0] if st else m.encoder[-1][0],
-        "mnasnet":    lambda m, st: m.layers[-1] if st else m.encoder[-1],
-        "vit":        lambda m, st: m.encoder.ln if st else m.norm,
-        "swin":       lambda m, st: m.features[-1][0].norm1 if st else m.features[-1][0].norm1,
+        "fasterrcnn": lambda m: m.backbone,
+        "resnet":     lambda m: m.layer4[-1],
+        "vgg":        lambda m: m.features[-1],
+        "dense":      lambda m: m.features[-1],
+        "mobile":     lambda m: m.features[-1],
+        "efficient":  lambda m: m.features[-1][0],
+        "mnasnet":    lambda m: m.layers[-1],
+        "vit":        lambda m: m.encoder.ln,
+        "swin":       lambda m: m.features[-1][0].norm1,
     }
-
+ 
     for key, target_fn in model_targets.items():
         if model_name.startswith(key):
-            args.target_layers = [target_fn(model, single_task)]
+            args.target_layers = [target_fn(root)]
             return
 
     raise ValueError(f"Model '{model_name}' does not have a predefined target_layer for GradCAM visualization.")
