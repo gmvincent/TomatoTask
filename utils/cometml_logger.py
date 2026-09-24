@@ -73,7 +73,7 @@ def log_experiment(
     if args.ddp and dist.get_rank() != 0:
         return  
     
-    log_metrics(experiment, metrics, loss, epoch, mode)
+    log_metrics(args, experiment, metrics, loss, epoch, mode)
     
     # log plots
     if (epoch >= args.epochs - 1) or (epoch % args.print_freq == 0):
@@ -157,11 +157,22 @@ def plot_distribution(args, experiment, dataloader, mode):
         # Bar plot with class names as x-axis ticks
         fig, ax = plt.subplots(figsize=(14, 11))
         
-        ax.bar(range(len(t.classes)), freqs, color="orchid")
+        bars = ax.bar(range(len(t.classes)), freqs, color="orchid")
         ax.set_xticks(range(len(t.classes)))
         ax.set_xticklabels(t.classes, rotation=90, ha="right")
         ax.set_xlabel('')
         ax.set_ylabel('Frequency')
+        
+        if t.type == "segmentation":
+            total = sum(freqs)
+            pct = [100 * f / total if total else 0 for f in freqs]
+            ax.bar_label(
+                bars,
+                labels=[f"{p:.2f}%" for p in pct],
+                fontsize=13,
+                padding=2,
+            )
+            ax.set_ylim(top=max(freqs) * 1.08)
         
         # Log the plot to CometML
         suffix = "" if single_task else f"_task{t.task_idx}"
@@ -202,7 +213,7 @@ def plot_confusion_matrix(args, experiment, y_true, y_pred, step, mode):
         experiment.log_figure(figure_name=f"{mode}/cm{suffix}", figure=plt.gcf(), step=step)
         plt.close(fig)
 
-# TODO: setup GradCam for segmentation
+# TODO: setup GradCam for segmentation, segmentation will require ["out"]
 def plot_cam(args, experiment, model, dataloader, step, mode, num_images=6):
     tasks = [t for t in resolve_tasks(args) if t.type == "classification"]
     single_task = args.num_tasks in ["1", "tomato"]
@@ -474,7 +485,7 @@ def plot_segmentation_outputs(args, experiment, model, dataloader, step, mode, n
         seg_mask = seg_mask.detach().cpu().numpy()
         
         with torch.no_grad():
-            outputs = model(inputs)
+            outputs = model(inputs)["out"] if isinstance(model(inputs), dict) else model(inputs)
             if isinstance(outputs, (list, tuple)):
                 outputs = outputs[model_out_idx]
             pred_mask = outputs.detach().cpu().argmax(dim=1).numpy()
