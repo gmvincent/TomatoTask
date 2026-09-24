@@ -31,18 +31,22 @@ def train_model(
         optimizer.zero_grad()
 
         start_time = time.time()
-        output = model(instances)
+        output = model(instances)["out"] if isinstance(model(instances), dict) else model(instances)
         end_time = time.time()
         
+        if args.task == "regression":
+            output = output.squeeze(1) 
+            preds = output = output.detach()
+            # Optional: predictions on the original 0–12 severity scale
+            # discrete_preds = torch.round(preds).clamp(0, 12)
+        else:
+            preds = output.argmax(dim=1)
+            
         loss = criterion(output, labels)
         
         loss.backward()
         optimizer.step()
         
-        if args.task == "regression":
-            preds = output.detach() 
-        else:
-            preds = output.argmax(dim=1)
         running_loss += loss.item() * batch_size
         running_samples += batch_size
 
@@ -109,15 +113,17 @@ def test_model(
             batch_size = instances.size(0)     
 
             start_time = time.time()
-            output = model(instances)
+            output = model(instances)["out"] if isinstance(model(instances), dict) else model(instances)
             end_time = time.time()
-            
-            loss = criterion(output, labels)
 
             if args.task == "regression":
-                preds = output.detach() 
+                output = output.squeeze(1) 
+                preds = output = output.detach()
             else:
                 preds = output.argmax(dim=1)
+                
+            loss = criterion(output, labels)
+            
             running_loss += loss.item() * batch_size
             running_samples += batch_size
 
