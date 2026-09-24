@@ -2,22 +2,45 @@ import torch
 import torch.distributed as dist
 
 @torch.no_grad()
-def class_pixel_counts(loader, num_classes, device, ignore_index=None):
-    """Count pixels per class over a (possibly distributed) dataloader."""
-    counts = torch.zeros(num_classes, dtype=torch.long, device=device)
-    for batch in loader:
-        targets = batch[1]  # adapt if your batch is a dict / different order
-        targets = targets.to(device, non_blocking=True)
-        if targets.dim() == 4 and targets.size(1) == num_classes:  # one-hot masks
-            targets = targets.argmax(dim=1)
-        targets = targets.long().reshape(-1)
-        if ignore_index is not None:
-            targets = targets[targets != ignore_index]
-        bc = torch.bincount(targets, minlength=num_classes)
-        assert bc.numel() == num_classes, f"Found label >= num_classes ({bc.numel()})"
-        counts += bc
+def class_pixel_counts(dataloader, tasks, num_classes, device, ignore_index=None):
+    """Count pixels per class over a dataloader."""
+    if isinstance(tasks, str):
+        tasks = [tasks]
+    if isinstance(num_classes, int):
+        num_classes = [num_classes] * len(tasks)
+
+    seg_idx = [i for i, t in enumerate(tasks) if t == "segmentation"]
+    counts = {
+        i: torch.zeros(num_classes[i], dtype=torch.long, device=device) for i in seg_idx
+    }
+
+    for batch in dataloader:
+        for i in seg_idx:
+            label = batch[i + 1]
+            if label is None or label.numel() == 0:
+                continue
+            label = label.to(device, non_blocking=True)
+            if label.dim() == 4 and label.size(1) == num_classes[i]:  # one-hot masks
+                label = label.argmax(dim=1)
+            label = label.long().reshape(-1)
+            if ignore_index is not None:
+                label = label[label != ignore_index]
+            bc = torch.bincount(label, minlength=num_classes[i])
+            if bc.numel() > num_classes[i]:
+                raise ValueError(
+                    f"Task {i}: found label {bc.numel() - 1}, "
+                    f"but num_classes is {num_classes[i]}"
+                )
+            counts[i] += bc
+    
     if dist.is_available() and dist.is_initialized():
-        dist.all_reduce(counts, op=dist.ReduceOp.SUM)
+        for i in seg_idx:  # same order on every rank
+            dist.all_reduce(counts[i], op=dist.ReduceOp.SUM)
+    
+    for i in seg_idx:
+        if counts[i].sum() == 0:
+            print(f"Warning: no labels found for segmentation task {i}")
+
     return counts
 
 

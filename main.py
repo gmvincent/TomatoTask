@@ -89,6 +89,7 @@ def main_worker(rank, args):
             experiment.end()
     
 def main(args, experiment, dataloaders, rank):
+    single_task = not isinstance(args.task, list)
     
     # load dataloaders
     train_dataloader, val_dataloader, test_dataloader = dataloaders
@@ -113,21 +114,28 @@ def main(args, experiment, dataloaders, rank):
         plot_distribution(args, experiment, plot_val_loader, mode="val")
         plot_distribution(args, experiment, plot_test_loader, mode="test")
         
-        seg_weights = None
-        if args.task == "segmentation":
-            counts = class_pixel_counts(plot_train_loader, args.num_classes, args.device)
-            seg_weights = class_weights(counts, scheme="inverse_sqrt").to(args.device)
-            
-            #freq = (counts.double() / counts.sum()).tolist()
-            #print(f"Pixel counts: {counts.tolist()}  freq: {freq}  weights: {seg_weights.tolist()}")
+    seg_weights = None
+    if single_task and args.task == "segmentation":
+        counts = class_pixel_counts(train_dataloader, args.task, args.num_classes, args.device)
+        seg_weights = class_weights(counts[0], scheme="inverse_sqrt").to(args.device)
+        if rank == 0:
+            experiment.log_parameters(
+                {f"class_{c}_weight": w for c, w in enumerate(seg_weights.tolist())}
+            )
+    elif not single_task and "segmentation" in args.task:
+        counts = class_pixel_counts(train_dataloader, args.task, args.num_classes, args.device)
+        seg_weights = {
+            i: class_weights(c, scheme="inverse_sqrt").to(args.device) for i, c in counts.items()
+        }
+        if rank == 0:
             experiment.log_parameters({
-                f"class_{i}_weight": w for i, w in enumerate(seg_weights.tolist())
+                f"task_{i}_class_{c}_weight": w
+                for i, w_task in seg_weights.items()
+                for c, w in enumerate(w_task.tolist())
             })
-        
+    
     if args.ddp: dist.barrier(device_ids=[args.gpu[rank]])
-    
-    single_task = not isinstance(args.task, list)
-    
+       
     batch = next(iter(train_dataloader))  
     images = batch[0]
     args.input_channels = images.shape[1]
@@ -175,6 +183,7 @@ def main(args, experiment, dataloaders, rank):
         if single_task:
             criterion = criterion_map[args.task]
         else:
+            # TODO: fix the segmentation loss weighting for multi-task
             criterion = [criterion_map[t]() for t in args.task]
         
         if args.optimizer_name == 'Adam':
