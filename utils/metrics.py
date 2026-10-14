@@ -42,7 +42,7 @@ def _build_regression_metrics(num_outputs):
         "MSE": torchmetrics.regression.MeanSquaredError(),
         "RMSE": torchmetrics.regression.MeanSquaredError(squared=False),
         "R2": torchmetrics.regression.R2Score(), #num_outputs=num_outputs),
-        "PearsonCorrCoef": torchmetrics.regression.PearsonCorrCoef(), #num_outputs=num_outputs),
+        #"PearsonCorrCoef": torchmetrics.regression.PearsonCorrCoef(), #num_outputs=num_outputs),
         "PredictionTime": PredictionTime(),
     }
 
