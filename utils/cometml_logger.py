@@ -455,7 +455,7 @@ def plot_attention_maps(args, experiment, model, dataloader, step, mode, num_ima
         experiment.log_figure(figure_name=f"{mode}/attention_maps{suffix}", figure=fig, step=step)
         plt.close(fig)    
 
-def plot_segmentation_outputs(args, experiment, model, dataloader, step, mode, num_images=6):
+def plot_segmentation_outputs(args, experiment, model, dataloader, step, mode, num_images=5):
     tasks = resolve_tasks(args)
     seg_tasks = [t for t in tasks if t.type == "segmentation"]
     if not seg_tasks:
@@ -552,7 +552,6 @@ def plot_segmentation_outputs(args, experiment, model, dataloader, step, mode, n
             inputs, seg_mask, t.classes, cls_labels, cls_names, model_out_idx=t.task_idx
         )
         
-        plt.tight_layout()
         suffix = "" if len(seg_tasks) == 1 else f"_task{t.task_idx}"
         experiment.log_figure(figure_name=f"{mode}/segmentation{suffix}", figure=fig, step=step)
         plt.close(fig)
