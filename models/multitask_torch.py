@@ -4,7 +4,7 @@ import torch.nn.functional as F
 
 import copy
 
-from models.model_heads import build_head, build_feature_extractor, classifier_prefix, probe_channels
+from models.model_heads import build_head, build_feature_extractor, build_segmentation_head, classifier_prefix, probe_channels
 
 class _VectorTaskHead(nn.Module):
     """A cloned hidden-FC prefix + a fresh final Linear sized for this task.
@@ -39,7 +39,7 @@ class MultiTask_Model(nn.Module):
     """One shared backbone, one head per task. Any mix of classification,
     regression and segmentation, for any backbone build_feature_extractor supports."""
     
-    def __init__(self, base_name, base_model, num_classes, tasks, in_channels=3):
+    def __init__(self, base_name, base_model, num_classes, tasks, in_channels=3, arch="unet"):
         super(MultiTask_Model, self).__init__()
         
         if len(num_classes) != len(tasks):
@@ -51,7 +51,7 @@ class MultiTask_Model(nn.Module):
         self.base_name = base_name.lower()
         self.tasks = list(tasks)
         self.num_tasks = len(num_classes)
-        
+        self.seg_arch = arch.lower()
         self.is_vit = self.base_name.startswith("vit")
 
         # take vector features from original model
@@ -65,7 +65,7 @@ class MultiTask_Model(nn.Module):
         self.task_heads = nn.ModuleList()
         for task, n_classes in zip(self.tasks, num_classes):
             if task == "segmentation":
-                head = build_head(task, channels["out"], n_classes)
+                head = build_segmentation_head(self.seg_arch, channels, n_classes, self.base_name)
             else:
                 final_linear = build_head(task, vector_in_features, n_classes)
                 head = _VectorTaskHead(copy.deepcopy(vector_prefix), final_linear)
@@ -81,8 +81,10 @@ class MultiTask_Model(nn.Module):
         head = self.task_heads[idx]
         
         if self.tasks[idx] == "segmentation":
-            logits = head(feats["out"])
-            return F.interpolate(logits, size=out_size, mode="bilinear", align_corners=False)
+            logits = head(feats)  # both seg heads take the full feature dict
+            if logits.shape[-2:] != out_size:  # DeepLab; U-Net is already full size
+                logits = F.interpolate(logits, size=out_size, mode="bilinear", align_corners=False)
+            return logits
         
         return head(self._to_vector(feats))
     
