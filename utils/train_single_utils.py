@@ -31,20 +31,27 @@ def train_model(
         optimizer.zero_grad()
 
         start_time = time.time()
-        output = model(instances)["out"] if isinstance(model(instances), dict) else model(instances)
+        model_output = model(instances)
         end_time = time.time()
         
+        output = model_output["out"] if isinstance(model_output, dict) else model_output
+        
         if args.task == "regression":
-            output = output.squeeze(1) 
-            preds = output = output.detach()
-            # Optional: predictions on the original 0–12 severity scale
-            # discrete_preds = torch.round(preds).clamp(0, 12)
+            output = output.squeeze(1)
+            preds = output.detach()
         else:
             preds = output.argmax(dim=1)
             
         loss = criterion(output, labels)
         
         loss.backward()
+        
+        if args.task == "regression":
+            torch.nn.utils.clip_grad_norm_(
+                model.parameters(),
+                max_norm=1.0,
+            )
+        
         optimizer.step()
         
         running_loss += loss.item() * batch_size
@@ -75,7 +82,8 @@ def train_model(
     # compute metrics at the end of this epoch
     if train_metrics is not None:
         metrics_dict = train_metrics.compute()
-        epoch_acc = metrics_dict["Accuracy"].item() if args.task != "regression" else metrics_dict["MAE"].item()
+        metric_key = {"regression": "MAE", "segmentation": "BalancedAccuracy"}.get(args.task, "Accuracy")
+        epoch_acc = metrics_dict[metric_key].item()
     else:
         epoch_acc = (running_correct / running_samples) if args.task != "regression" else float("nan")
 
@@ -113,12 +121,14 @@ def test_model(
             batch_size = instances.size(0)     
 
             start_time = time.time()
-            output = model(instances)["out"] if isinstance(model(instances), dict) else model(instances)
+            model_output = model(instances)
             end_time = time.time()
 
+            output = model_output["out"] if isinstance(model_output, dict) else model_output
+            
             if args.task == "regression":
-                output = output.squeeze(1) 
-                preds = output = output.detach()
+                output = output.squeeze(1)
+                preds = output.detach()
             else:
                 preds = output.argmax(dim=1)
                 
@@ -152,7 +162,8 @@ def test_model(
     # compute metrics at the end of this epoch
     if test_metrics is not None:
         metrics_dict = test_metrics.compute()
-        epoch_acc = metrics_dict["Accuracy"].item() if args.task != "regression" else metrics_dict["MAE"].item()
+        metric_key = {"regression": "MAE", "segmentation": "BalancedAccuracy"}.get(args.task, "Accuracy")
+        epoch_acc = metrics_dict[metric_key].item()
     else:
         epoch_acc = (running_correct / running_samples) if args.task != "regression" else float("nan")
 
