@@ -7,6 +7,8 @@ from torchvision.models.segmentation.deeplabv3 import DeepLabV3
 from models.model_heads import build_head, build_segmentation_model
 from models.multitask_torch import MultiTask_Model
 
+import segmentation_models_pytorch as smp
+
 model_file = os.path.join(os.path.dirname(__file__), "torch_hub_models.json")
 with open(model_file, "r") as f:
     torch_hub_models = json.load(f)
@@ -24,28 +26,31 @@ def get_model(args, model_name, single_task=True):
       args.input_channels -- 3 to leave the input layer untouched
     """
     if model_name not in torch_hub_models:
-            raise ValueError(f"Model '{model_name}' not found in available models.")
-  
-    model = _build_backbone(args, model_name)
+        raise ValueError(f"Model '{model_name}' not found in available models.")
+    
+    tasks = args.task if isinstance(args.task, list) else [args.task]
+    seg_arch = "unet"
+    dilate = "segmentation" in tasks and seg_arch == "deeplabv3"
+    
+    model = _build_backbone(args, model_name, dilate)
     model = modify_input_layer(args, model_name, model)
+    
+    get_target_layer(args, model_name, model)
     
     if single_task:
         if args.task == "segmentation":
-            model = build_segmentation_model(model, model_name, args.num_classes, in_channels=args.input_channels)
+            model = build_segmentation_model(model, model_name, args.num_classes, arch=seg_arch, in_channels=args.input_channels)
         else:
             model = modify_head(model, model_name, args.task, args.num_classes)
             
     else:
-        model = MultiTask_Model(model_name, model, args.num_classes, args.task, in_channels=args.input_channels)
- 
-    get_target_layer(args, model_name, model)
+        model = MultiTask_Model(model_name, model, args.num_classes, args.task, arch=seg_arch, in_channels=args.input_channels)
  
     return model
 
-def _build_backbone(args, model_name):
-    tasks = args.task if isinstance(args.task, list) else [args.task]
+def _build_backbone(args, model_name, dilate=False):
     kwargs = {}
-    if ("segmentation" in tasks) and (model_name.lower() in ["resnet50", "resnet101"]):
+    if dilate and (model_name.lower() in ["resnet50", "resnet101"]):
             kwargs["replace_stride_with_dilation"] = [False, True, True]
 
     if isinstance(args.pretrained, bool):
@@ -110,6 +115,8 @@ def modify_input_layer(args, model_name, model):
                       lambda m, layer: m.features[0].__setitem__(0, layer)),
         "efficient": (lambda m: m.features[0][0],
                       lambda m, layer: m.features[0].__setitem__(0, layer)),
+        "mnasnet":   (lambda m: m.layers[0],
+                      lambda m, layer: m.layers.__setitem__(0, layer)),
         "vit":       (lambda m: m.conv_proj,
                       lambda m, layer: setattr(m, "conv_proj", layer)),
         "swin":      (lambda m: m.features[0][0],
@@ -135,18 +142,14 @@ def modify_input_layer(args, model_name, model):
             )
                         
             with torch.no_grad():
+                w = old_conv.weight                                   # (out, 3, k, k)
                 if args.input_channels == 1:
-                    new_conv.weight[:] = old_conv.weight.mean(
-                        dim=1, keepdim=True
-                    )
+                    new_conv.weight.copy_(w.sum(dim=1, keepdim=True))
                 else:
-                    n_copy = min(3, args.input_channels) # if args.input_channels ==2
-                    new_conv.weight[:, :n_copy] = old_conv.weight[:, :n_copy]
-                    if args.input_channels > 3:
-                        new_conv.weight[:, 3:] = (
-                            old_conv.weight[:, :1]
-                            .repeat(1, args.input_channels - 3, 1, 1)
-                        )
+                    idx = torch.arange(args.input_channels, device=w.device) % w.shape[1]
+                    new_conv.weight.copy_(w[:, idx] * (w.shape[1] / args.input_channels))
+                if old_conv.bias is not None:
+                    new_conv.bias.copy_(old_conv.bias)
 
             setter(model, new_conv)
 
@@ -159,7 +162,7 @@ def get_target_layer(args, model_name, model):
     model_name = model_name.lower()
 
     # Segmentation and multi-task models both hold their trunk in `.backbone`
-    root = model.backbone if isinstance(model, (DeepLabV3, MultiTask_Model)) else model
+    #root = model.backbone if isinstance(model, (DeepLabV3, MultiTask_Model)) else model
  
     model_targets = {
         "fasterrcnn": lambda m: m.backbone,
@@ -175,7 +178,7 @@ def get_target_layer(args, model_name, model):
  
     for key, target_fn in model_targets.items():
         if model_name.startswith(key):
-            args.target_layers = [target_fn(root)]
+            args.target_layers = [target_fn(model)]
             return
 
     raise ValueError(f"Model '{model_name}' does not have a predefined target_layer for GradCAM visualization.")
