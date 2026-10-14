@@ -46,6 +46,7 @@ class TomatoTask2D(torch.utils.data.Dataset):
                  num_tasks: str="1", 
                  task: str= "classification",
                  num_views: int=-1, 
+                 reg_target: str="hb", # "hb" or "pct"
                  ):
         """
         Args:
@@ -61,6 +62,7 @@ class TomatoTask2D(torch.utils.data.Dataset):
         self.path = os.path.join(root, split)
         self.transform = transform
         self.include_depth = depth
+        self.reg_target = reg_target
         self.num_tasks = num_tasks
         self.tasks = [task] if isinstance(task, str) else list(task)
         
@@ -154,16 +156,15 @@ class TomatoTask2D(torch.utils.data.Dataset):
         lesion_mask = (raw_mask == 2).astype(np.float32)
         return canopy_mask, lesion_mask
  
-    @staticmethod
-    def _severity(canopy_mask: np.ndarray, lesion_mask: np.ndarray, target: str="hb") -> float:
+    def _severity(self, canopy_mask: np.ndarray, lesion_mask: np.ndarray) -> float:
         canopy_px = float(canopy_mask.sum())
         lesion_px = float(lesion_mask.sum())
         pct = min(100.0 * lesion_px / canopy_px, 100.0) if canopy_px > 0 else 0.0
         
-        if target == "pct":
+        if self.reg_target == "pct":
             return pct
         
-        elif target == "hb":
+        elif self.reg_target == "hb":
             if pct <= 0:
                 return 0.0
             elif pct >= 100:
