@@ -4,7 +4,9 @@ import torch
 import numpy as np
 import pandas as pd
 from PIL import Image
+
 from torchvision import tv_tensors
+from torchvision.transforms import v2
 
 from sklearn.preprocessing import MinMaxScaler
 
@@ -65,9 +67,9 @@ class TomatoTask2D(torch.utils.data.Dataset):
         self.depth_global_min = 353.6300
         self.depth_global_max = 1219.0477
         
-        exclude_days=() #"DAI3", "DAI22", "DAI25", "DAI28")
+        exclude_days=("DAI3") #"DAI3", "DAI22", "DAI25", "DAI28")
         
-        all_files = os.listdir(self.path)
+        all_files = sorted(os.listdir(self.path))
         self.img_files = [
             f for f in all_files
             if f.endswith(".png") and f.split("_")[2] not in exclude_days
@@ -174,14 +176,15 @@ class TomatoTask2D(torch.utils.data.Dataset):
         img_name = self.img_files[idx]
         base_name = os.path.splitext(img_name)[0]
         
-        img = self._load_image(img_name)
+        img_np = self._load_image(img_name)
+        rgb = tv_tensors.Image(torch.from_numpy(img_np).permute(2, 0, 1))
         
+        depth = None
         if self.include_depth:
-            d_norm = self._load_depth(base_name, img.shape[:2])
-            img = np.concatenate([img, d_norm], axis=2)
+            d = self._load_depth(base_name, img_np.shape[:2])
+            depth = tv_tensors.Mask(torch.from_numpy(d).permute(2, 0, 1).float())
         
-        raw_mask = None
-        regression_score = None
+        raw_mask, regression_score = None, None
         if self._needs_mask:
             raw_mask_np = self._load_raw_mask(base_name)
             
@@ -193,12 +196,13 @@ class TomatoTask2D(torch.utils.data.Dataset):
         
         # transforms    
         if self.transform:
-            if self._needs_mask:
-                img, raw_mask = self.transform(img, raw_mask)
-            else:
-                img = self.transform(img)
+            # None entries pass through untouched
+            rgb, depth, raw_mask = self.transform(rgb, depth, raw_mask)
+        else:
+            rgb = v2.functional.to_dtype(rgb, torch.float32, scale=True)
+
+        img = torch.cat([rgb, depth.as_subclass(torch.Tensor)], dim=0) if depth is not None else rgb
         
-        img = img if torch.is_tensor(img) else torch.as_tensor(img)
         canopy_mask = lesion_mask = None
         if raw_mask is not None:
             raw_mask = raw_mask.as_subclass(torch.Tensor).long()
